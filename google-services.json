@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "395017123262",
+    "project_id": "butcher-shop-56416",
+    "storage_bucket": "butcher-shop-56416.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:395017123262:android:aac6d13c5fc8441ad235ef",
+        "android_client_info": {
+          "package_name": "com.auntielizzy.butcher"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD5KuThHBLdIuHd8bPnTyPrcL6mXYfbsv4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

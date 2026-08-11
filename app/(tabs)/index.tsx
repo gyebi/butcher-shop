@@ -1,98 +1,246 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { useState } from "react";
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import ProductCard, { Product } from "../../components/ProductCard";
+
+import SellModal from "../../components/SellModal";
+import SummaryCard from "../../components/SummaryCard";
+import AddStockModal from "../../components/AddStockModal";
+import SettingsModal from "@/components/SettingsModal";
+
+const initialProducts: Product[] = [
+  {
+    id: "1",
+    name: "Chicken Back",
+    weightKg: 40,
+    fullStockKg: 50,
+    pricePerKg: 25,
+    thumbnail: require("../../assets/images/chicken-back.png"),
+  },
+  {
+    id: "2",
+    name: "Gozde Sausage",
+    weightKg: 18,
+    fullStockKg: 30,
+    pricePerKg: 40,
+    thumbnail: require("../../assets/images/sausage.png"),
+  },
+  {
+    id: "3",
+    name: "Beef Tripe",
+    weightKg: 8,
+    fullStockKg: 40,
+    pricePerKg: 35,
+    thumbnail: require("../../assets/images/beef-tripe.png"),
+  },
+  {
+    id: "4",
+    name: "Chicken Drumsticks",
+    weightKg: 22,
+    fullStockKg: 30,
+    pricePerKg: 32,
+    thumbnail: require("../../assets/images/chicken-drumsticks.png"),
+  },
+];
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const [products, setProducts] = useState<Product[]>(initialProducts);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(
+    null,
+  );
+
+  const [sellProduct, setSellProduct] = useState<Product | null>(null);
+
+  const [addStockProduct, setAddStockProduct] = useState<Product | null>(null);
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const [reorderPercent, setReorderPercent] = useState(20);
+  const [markupPercent, setMarkupPercent] = useState(25);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+
+  const totalWeight = products.reduce(
+    (total, product) => total + product.weightKg,
+    0,
+  );
+
+  const totalValue = products.reduce(
+    (total, product) => total + product.weightKg * product.pricePerKg,
+    0,
+  );
+
+  const handleSale = (productId: string, weightKg: number) => {
+    setProducts((currentProducts) =>
+      currentProducts.map((product) => {
+        if (product.id !== productId) {
+          return product;
+        }
+
+        const remainingWeight = product.weightKg - weightKg;
+        const remainingFullStock = product.fullStockKg - weightKg;
+
+        return {
+          ...product,
+          weightKg: Math.round(Math.max(0, remainingWeight) * 1000) / 1000,
+          fullStockKg:
+            Math.round(Math.max(0, remainingFullStock) * 1000) / 1000,
+        };
+      }),
+    );
+
+    setSelectedProductId(null);
+    setSellProduct(null);
+  };
+
+  const handleAddStock = ({
+    productId,
+    addedWeightKg,
+    sellingPricePerKg,
+  }: {
+    productId: string;
+    addedWeightKg: number;
+    totalPurchaseCost: number;
+    costPerKg: number;
+    sellingPricePerKg: number;
+  }) => {
+    setProducts((currentProducts) =>
+      currentProducts.map((product) => {
+        if (product.id !== productId) {
+          return product;
+        }
+
+        return {
+          ...product,
+          weightKg:
+            Math.round((product.weightKg + addedWeightKg) * 1000) / 1000,
+          fullStockKg:
+            Math.round((product.fullStockKg + addedWeightKg) * 1000) / 1000,
+          pricePerKg: sellingPricePerKg,
+        };
+      }),
+    );
+
+    setSelectedProductId(null);
+    setAddStockProduct(null);
+  };
+
+  return (
+    <>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+      >
+        <Text style={styles.title}>Lizzy's Butcher Shop</Text>
+
+        <SummaryCard totalWeight={totalWeight} totalValue={totalValue} />
+
+        <Text style={styles.sectionTitle}>Products</Text>
+
+        {products.map((product) => (
+  <ProductCard
+    key={product.id}
+    product={product}
+    reorderPercent={reorderPercent}
+    isSelected={selectedProductId === product.id}
+    onPress={() => {
+      setSelectedProductId(
+        selectedProductId === product.id ? null : product.id
+      );
+    }}
+    onSell={() => {
+      setSellProduct(product);
+    }}
+            onAdd={() => {
+              setAddStockProduct(product);
+            }}
+          />
+))}
+      </ScrollView>
+
+      <SellModal
+        product={sellProduct}
+        onClose={() => {
+          setSellProduct(null);
+        }}
+        onConfirm={handleSale}
+      />
+
+      <AddStockModal
+        product={addStockProduct}
+        defaultMarkupPercent={markupPercent}
+        onClose={() => {
+          setAddStockProduct(null);
+        }}
+        onConfirm={handleAddStock}
+      />
+
+      <SettingsModal
+        visible={settingsVisible}
+        reorderPercent={reorderPercent}
+        markupPercent={markupPercent}
+        voiceEnabled={voiceEnabled}
+        onClose={() => {
+          setSettingsVisible(false);
+        }}
+        onSave={(settings) => {
+          setReorderPercent(settings.reorderPercent);
+          setMarkupPercent(settings.markupPercent);
+          setVoiceEnabled(settings.voiceEnabled);
+          setSettingsVisible(false);
+        }}
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: {
+    flex: 1,
+    backgroundColor: "#f3f1ed",
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+
+  content: {
+    padding: 20,
+    paddingTop: 60,
+    paddingBottom: 50,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 18,
+  },
+
+  title: {
+    fontSize: 30,
+    fontWeight: "800",
+    color: "#211c18",
+    marginBottom: 18,
+  },
+
+  settingsButton: {
+    backgroundColor: "#211c18",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+  },
+
+  settingsButtonText: {
+    color: "#ffffff",
+    fontWeight: "800",
+    fontSize: 12,
+  },
+
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#211c18",
+    marginBottom: 14,
   },
 });
