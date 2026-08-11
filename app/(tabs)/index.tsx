@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+import { testFirebaseConnection } from "../src/firebase-test";
+
 import {
   Pressable,
   ScrollView,
@@ -63,6 +66,10 @@ export default function HomeScreen() {
   const [reorderPercent, setReorderPercent] = useState(20);
   const [markupPercent, setMarkupPercent] = useState(25);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+
+  useEffect(() => {
+    testFirebaseConnection();
+  }, []);
 
   const totalWeight = products.reduce(
     (total, product) => total + product.weightKg,
