@@ -1,23 +1,34 @@
-import { Tabs } from "expo-router";
+import {
+  DarkTheme,
+  DefaultTheme,
+  ThemeProvider,
+} from "@react-navigation/native";
 
-export default function TabsLayout() {
+import { Stack } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import "react-native-reanimated";
+
+import { useColorScheme } from "@/hooks/use-color-scheme";
+
+export default function RootLayout() {
+  const colorScheme = useColorScheme();
+
   return (
-    <Tabs>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Home",
-          headerShown: false,
-        }}
-      />
+    <ThemeProvider
+      value={
+        colorScheme === "dark"
+          ? DarkTheme
+          : DefaultTheme
+      }
+    >
+      <Stack>
+        <Stack.Screen
+          name="(tabs)"
+          options={{ headerShown: false }}
+        />
+      </Stack>
 
-      <Tabs.Screen
-        name="settings"
-        options={{
-          title: "Settings",
-          headerShown: false,
-        }}
-      />
-    </Tabs>
+      <StatusBar style="auto" />
+    </ThemeProvider>
   );
 }
