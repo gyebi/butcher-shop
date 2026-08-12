@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import { testFirestoreConnection } from "@/src/services/firestore-test";
+
+import {
+  loadBusinessSettings,
+  saveBusinessSettings,
+} from "@/src/services/settings";
 
 import {
   Pressable,
@@ -52,14 +56,7 @@ const initialProducts: Product[] = [
 ];
 
 export default function HomeScreen() {
-  console.log("Home Screen Loaded")
-
   const [products, setProducts] = useState<Product[]>(initialProducts);
-
-  useEffect(() => {
-    console.log("RUNNING FIRESTORE TEST");
-    testFirestoreConnection();
-  }, []);
 
   const [selectedProductId, setSelectedProductId] = useState<string | null>(
     null,
@@ -74,7 +71,25 @@ export default function HomeScreen() {
   const [voiceEnabled, setVoiceEnabled] = useState(true);
 
   useEffect(() => {
-    testFirestoreConnection();
+    async function loadSettings() {
+      try {
+        const savedSettings = await loadBusinessSettings();
+
+        if (!savedSettings) {
+          return;
+        }
+
+        setReorderPercent(savedSettings.reorderPercent);
+
+        setMarkupPercent(savedSettings.markupPercent);
+
+        setVoiceEnabled(savedSettings.voiceEnabled);
+      } catch (error) {
+        console.error("Failed to load settings:", error);
+      }
+    }
+
+    loadSettings();
   }, []);
 
   const totalWeight = products.reduce(
@@ -155,24 +170,24 @@ export default function HomeScreen() {
         <Text style={styles.sectionTitle}>Products</Text>
 
         {products.map((product) => (
-  <ProductCard
-    key={product.id}
-    product={product}
-    reorderPercent={reorderPercent}
-    isSelected={selectedProductId === product.id}
-    onPress={() => {
-      setSelectedProductId(
-        selectedProductId === product.id ? null : product.id
-      );
-    }}
-    onSell={() => {
-      setSellProduct(product);
-    }}
+          <ProductCard
+            key={product.id}
+            product={product}
+            reorderPercent={reorderPercent}
+            isSelected={selectedProductId === product.id}
+            onPress={() => {
+              setSelectedProductId(
+                selectedProductId === product.id ? null : product.id,
+              );
+            }}
+            onSell={() => {
+              setSellProduct(product);
+            }}
             onAdd={() => {
               setAddStockProduct(product);
             }}
           />
-))}
+        ))}
       </ScrollView>
 
       <SellModal
@@ -200,11 +215,20 @@ export default function HomeScreen() {
         onClose={() => {
           setSettingsVisible(false);
         }}
-        onSave={(settings) => {
-          setReorderPercent(settings.reorderPercent);
-          setMarkupPercent(settings.markupPercent);
-          setVoiceEnabled(settings.voiceEnabled);
-          setSettingsVisible(false);
+        onSave={async (settings) => {
+          try {
+            await saveBusinessSettings(settings);
+
+            setReorderPercent(settings.reorderPercent);
+
+            setMarkupPercent(settings.markupPercent);
+
+            setVoiceEnabled(settings.voiceEnabled);
+
+            setSettingsVisible(false);
+          } catch (error) {
+            console.error("Failed to save settings:", error);
+          }
         }}
       />
     </>
