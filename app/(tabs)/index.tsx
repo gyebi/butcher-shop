@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-
-import { testFirebaseConnection } from "../src/firebase-test";
+import { testFirestoreConnection } from "@/src/services/firestore-test";
 
 import {
   Pressable,
@@ -53,7 +52,14 @@ const initialProducts: Product[] = [
 ];
 
 export default function HomeScreen() {
+  console.log("Home Screen Loaded")
+
   const [products, setProducts] = useState<Product[]>(initialProducts);
+
+  useEffect(() => {
+    console.log("RUNNING FIRESTORE TEST");
+    testFirestoreConnection();
+  }, []);
 
   const [selectedProductId, setSelectedProductId] = useState<string | null>(
     null,
@@ -68,7 +74,7 @@ export default function HomeScreen() {
   const [voiceEnabled, setVoiceEnabled] = useState(true);
 
   useEffect(() => {
-    testFirebaseConnection();
+    testFirestoreConnection();
   }, []);
 
   const totalWeight = products.reduce(

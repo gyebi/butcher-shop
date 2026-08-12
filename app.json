@@ -4,7 +4,7 @@
     "slug": "butcher-shop",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/auntie-lizzy.png",
+    "icon": "./assets/images/auntie-lizzys-icon-512.png",
     "scheme": "butchershop",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -16,7 +16,7 @@
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/auntie-lizzy.png",
+        "foregroundImage": "./assets/images/auntie-lizzys-icon-512.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
@@ -25,7 +25,7 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/auntie-lizzys-icon-192.png"
     },
     "plugins": [
       "expo-router",
