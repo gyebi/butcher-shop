@@ -6,6 +6,12 @@ import {
 } from "@/src/services/settings";
 
 import {
+  loadProducts,
+  saveProduct,
+  seedProducts,
+} from "@/src/services/products";
+
+import {
   Pressable,
   ScrollView,
   StyleSheet,
@@ -20,7 +26,7 @@ import SummaryCard from "../../components/SummaryCard";
 import AddStockModal from "../../components/AddStockModal";
 import SettingsModal from "@/components/SettingsModal";
 
-const initialProducts: Product[] = [
+const seedProductData: Product[] = [
   {
     id: "1",
     name: "Chicken Back",
@@ -55,8 +61,32 @@ const initialProducts: Product[] = [
   },
 ];
 
+function hydrateProducts(
+  records: Array<{
+    id: string;
+    name: string;
+    weightKg: number;
+    fullStockKg: number;
+    pricePerKg: number;
+  }>,
+) {
+  return records.map((record) => {
+    const seededProduct = seedProductData.find(
+      (product) => product.id === record.id,
+    );
+
+    return {
+      ...record,
+      thumbnail:
+        seededProduct?.thumbnail ??
+        require("../../assets/images/favicon.png"),
+    };
+  });
+}
+
 export default function HomeScreen() {
-  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [productsLoading, setProductsLoading] = useState(true);
 
   const [selectedProductId, setSelectedProductId] = useState<string | null>(
     null,
@@ -92,6 +122,31 @@ export default function HomeScreen() {
     loadSettings();
   }, []);
 
+
+  useEffect(() => {
+    async function initialiseProducts() {
+      try {
+        let savedProducts = await loadProducts();
+
+        if (savedProducts.length === 0) {
+          await seedProducts(seedProductData);
+          savedProducts = await loadProducts();
+        }
+
+        setProducts(hydrateProducts(savedProducts));
+      } catch (error) {
+        console.error("Failed to load products:", error);
+
+        // Temporary fallback while developing.
+        setProducts(seedProductData);
+      } finally {
+        setProductsLoading(false);
+      }
+    }
+
+    initialiseProducts();
+  }, []);
+
   const totalWeight = products.reduce(
     (total, product) => total + product.weightKg,
     0,
@@ -102,143 +157,220 @@ export default function HomeScreen() {
     0,
   );
 
-  const handleSale = (productId: string, weightKg: number) => {
-    setProducts((currentProducts) =>
-      currentProducts.map((product) => {
-        if (product.id !== productId) {
-          return product;
-        }
-
-        const remainingWeight = product.weightKg - weightKg;
-        const remainingFullStock = product.fullStockKg - weightKg;
-
-        return {
-          ...product,
-          weightKg: Math.round(Math.max(0, remainingWeight) * 1000) / 1000,
-          fullStockKg:
-            Math.round(Math.max(0, remainingFullStock) * 1000) / 1000,
-        };
-      }),
+  if (productsLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>Loading stock...</Text>
+      </View>
     );
+  }
 
-    setSelectedProductId(null);
-    setSellProduct(null);
+  const handleSale = async (
+    productId: string,
+    weightKg: number
+  ) => {
+    const product =
+      products.find(
+        (item) => item.id === productId
+      );
+
+    if (!product) {
+      return;
+    }
+
+    if (
+      weightKg <= 0 ||
+      weightKg > product.weightKg
+    ) {
+      return;
+    }
+
+    const updatedProduct = {
+      ...product,
+      weightKg:
+        Math.round(
+          (product.weightKg - weightKg) *
+          1000
+        ) / 1000,
+    };
+
+    try {
+      await saveProduct(updatedProduct);
+
+      setProducts((currentProducts) =>
+        currentProducts.map((item) =>
+          item.id === productId
+            ? updatedProduct
+            : item
+        )
+      );
+
+      setSelectedProductId(null);
+      setSellProduct(null);
+    } catch (error) {
+      console.error(
+        "Failed to save sale stock update:",
+        error
+      );
+    }
   };
 
-  const handleAddStock = ({
-    productId,
-    addedWeightKg,
-    sellingPricePerKg,
-  }: {
-    productId: string;
-    addedWeightKg: number;
-    totalPurchaseCost: number;
-    costPerKg: number;
-    sellingPricePerKg: number;
-  }) => {
-    setProducts((currentProducts) =>
-      currentProducts.map((product) => {
-        if (product.id !== productId) {
-          return product;
-        }
+const handleAddStock = async ({
+  productId,
+  addedWeightKg,
+  sellingPricePerKg,
+}: {
+  productId: string;
+  addedWeightKg: number;
+  totalPurchaseCost: number;
+  costPerKg: number;
+  sellingPricePerKg: number;
+}) => {
+  const product = products.find(
+    (item) => item.id === productId
+  );
 
-        return {
-          ...product,
-          weightKg:
-            Math.round((product.weightKg + addedWeightKg) * 1000) / 1000,
-          fullStockKg:
-            Math.round((product.fullStockKg + addedWeightKg) * 1000) / 1000,
-          pricePerKg: sellingPricePerKg,
-        };
-      }),
+  if (!product) {
+    return;
+  }
+
+  const newWeight =
+    product.weightKg + addedWeightKg;
+
+  const updatedProduct = {
+    ...product,
+
+    weightKg:
+      Math.round(newWeight * 1000) /
+      1000,
+
+    pricePerKg:
+      Math.round(
+        sellingPricePerKg * 100
+      ) / 100,
+
+    fullStockKg: Math.max(
+      product.fullStockKg,
+      newWeight
+    ),
+  };
+
+  try {
+    await saveProduct(updatedProduct);
+
+    setProducts((currentProducts) =>
+      currentProducts.map((item) =>
+        item.id === productId
+          ? updatedProduct
+          : item
+      )
     );
 
     setSelectedProductId(null);
     setAddStockProduct(null);
-  };
+  } catch (error) {
+    console.error(
+      "Failed to add stock:",
+      error
+    );
+  }
+};
 
-  return (
-    <>
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.content}
-      >
-        <Text style={styles.title}>Lizzy's Butcher Shop</Text>
+return (
+  <>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+    >
+      <Text style={styles.title}>Lizzy's Butcher Shop</Text>
 
-        <SummaryCard totalWeight={totalWeight} totalValue={totalValue} />
+      <SummaryCard totalWeight={totalWeight} totalValue={totalValue} />
 
-        <Text style={styles.sectionTitle}>Products</Text>
+      <Text style={styles.sectionTitle}>Products</Text>
 
-        {products.map((product) => (
-          <ProductCard
-            key={product.id}
-            product={product}
-            reorderPercent={reorderPercent}
-            isSelected={selectedProductId === product.id}
-            onPress={() => {
-              setSelectedProductId(
-                selectedProductId === product.id ? null : product.id,
-              );
-            }}
-            onSell={() => {
-              setSellProduct(product);
-            }}
-            onAdd={() => {
-              setAddStockProduct(product);
-            }}
-          />
-        ))}
-      </ScrollView>
+      {products.map((product) => (
+        <ProductCard
+          key={product.id}
+          product={product}
+          reorderPercent={reorderPercent}
+          isSelected={selectedProductId === product.id}
+          onPress={() => {
+            setSelectedProductId(
+              selectedProductId === product.id ? null : product.id,
+            );
+          }}
+          onSell={() => {
+            setSellProduct(product);
+          }}
+          onAdd={() => {
+            setAddStockProduct(product);
+          }}
+        />
+      ))}
+    </ScrollView>
 
-      <SellModal
-        product={sellProduct}
-        onClose={() => {
-          setSellProduct(null);
-        }}
-        onConfirm={handleSale}
-      />
+    <SellModal
+      product={sellProduct}
+      onClose={() => {
+        setSellProduct(null);
+      }}
+      onConfirm={handleSale}
+    />
 
-      <AddStockModal
-        product={addStockProduct}
-        defaultMarkupPercent={markupPercent}
-        onClose={() => {
-          setAddStockProduct(null);
-        }}
-        onConfirm={handleAddStock}
-      />
+    <AddStockModal
+      product={addStockProduct}
+      defaultMarkupPercent={markupPercent}
+      onClose={() => {
+        setAddStockProduct(null);
+      }}
+      onConfirm={handleAddStock}
+    />
 
-      <SettingsModal
-        visible={settingsVisible}
-        reorderPercent={reorderPercent}
-        markupPercent={markupPercent}
-        voiceEnabled={voiceEnabled}
-        onClose={() => {
+    <SettingsModal
+      visible={settingsVisible}
+      reorderPercent={reorderPercent}
+      markupPercent={markupPercent}
+      voiceEnabled={voiceEnabled}
+      onClose={() => {
+        setSettingsVisible(false);
+      }}
+      onSave={async (settings) => {
+        try {
+          await saveBusinessSettings(settings);
+
+          setReorderPercent(settings.reorderPercent);
+
+          setMarkupPercent(settings.markupPercent);
+
+          setVoiceEnabled(settings.voiceEnabled);
+
           setSettingsVisible(false);
-        }}
-        onSave={async (settings) => {
-          try {
-            await saveBusinessSettings(settings);
-
-            setReorderPercent(settings.reorderPercent);
-
-            setMarkupPercent(settings.markupPercent);
-
-            setVoiceEnabled(settings.voiceEnabled);
-
-            setSettingsVisible(false);
-          } catch (error) {
-            console.error("Failed to save settings:", error);
-          }
-        }}
-      />
-    </>
-  );
+        } catch (error) {
+          console.error("Failed to save settings:", error);
+        }
+      }}
+    />
+  </>
+);
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#f3f1ed",
+  },
+
+  loadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f3f1ed",
+  },
+
+  loadingText: {
+    color: "#5d554f",
+    fontSize: 15,
+    fontWeight: "600",
   },
 
   content: {

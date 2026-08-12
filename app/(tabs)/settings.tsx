@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -7,6 +7,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 
 import {
   loadBusinessSettings,
@@ -22,40 +23,41 @@ export default function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
-  useEffect(() => {
-    async function loadSettings() {
-      try {
-        const savedSettings = await loadBusinessSettings();
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
 
-        if (savedSettings) {
-          setReorderInput(
-            String(savedSettings.reorderPercent)
-          );
+      async function loadSettings() {
+        try {
+          setLoading(true);
 
-          setMarkupInput(
-            String(savedSettings.markupPercent)
-          );
+          const savedSettings = await loadBusinessSettings();
 
-          setVoiceEnabled(
-            savedSettings.voiceEnabled
-          );
+          if (!isActive || !savedSettings) {
+            return;
+          }
+
+          setReorderInput(String(savedSettings.reorderPercent));
+          setMarkupInput(String(savedSettings.markupPercent));
+          setVoiceEnabled(savedSettings.voiceEnabled);
+          setMessage("");
+        } catch (error) {
+          console.error("Failed to load settings:", error);
+          setMessage("Could not load saved settings.");
+        } finally {
+          if (isActive) {
+            setLoading(false);
+          }
         }
-      } catch (error) {
-        console.error(
-          "Failed to load settings:",
-          error
-        );
-
-        setMessage(
-          "Could not load saved settings."
-        );
-      } finally {
-        setLoading(false);
       }
-    }
 
-    loadSettings();
-  }, []);
+      loadSettings();
+
+      return () => {
+        isActive = false;
+      };
+    }, []),
+  );
 
   const reorderPercent = Number(reorderInput);
   const markupPercent = Number(markupInput);
