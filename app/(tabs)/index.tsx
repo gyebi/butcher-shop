@@ -11,6 +11,8 @@ import {
   seedProducts,
 } from "@/src/services/products";
 
+import { createStockBatch } from "@/src/services/stock-batches";
+
 import {
   Pressable,
   ScrollView,
@@ -215,66 +217,67 @@ export default function HomeScreen() {
     }
   };
 
-const handleAddStock = async ({
-  productId,
-  addedWeightKg,
-  sellingPricePerKg,
-}: {
-  productId: string;
-  addedWeightKg: number;
-  totalPurchaseCost: number;
-  costPerKg: number;
-  sellingPricePerKg: number;
-}) => {
-  const product = products.find(
-    (item) => item.id === productId
-  );
+  const handleAddStock = async ({
+    productId,
+    addedWeightKg,
+    totalPurchaseCost,
+    costPerKg,
+    sellingPricePerKg,
+  }: {
+    productId: string;
+    addedWeightKg: number;
+    totalPurchaseCost: number;
+    costPerKg: number;
+    sellingPricePerKg: number;
+  }) => {
+    const product = products.find((item) => item.id === productId);
 
-  if (!product) {
-    return;
-  }
+    if (!product) {
+      return;
+    }
 
-  const newWeight =
-    product.weightKg + addedWeightKg;
+    if (
+      addedWeightKg <= 0 ||
+      totalPurchaseCost <= 0 ||
+      costPerKg <= 0 ||
+      sellingPricePerKg <= 0
+    ) {
+      return;
+    }
 
-  const updatedProduct = {
-    ...product,
+    const newWeight = product.weightKg + addedWeightKg;
 
-    weightKg:
-      Math.round(newWeight * 1000) /
-      1000,
+    const updatedProduct = {
+      ...product,
+      weightKg: Math.round(newWeight * 1000) / 1000,
+      pricePerKg: Math.round(sellingPricePerKg * 100) / 100,
+      fullStockKg: Math.max(product.fullStockKg, newWeight),
+    };
 
-    pricePerKg:
-      Math.round(
-        sellingPricePerKg * 100
-      ) / 100,
+    try {
+      await createStockBatch({
+        productId: product.id,
+        productName: product.name,
+        weightReceivedKg: addedWeightKg,
+        totalPurchaseCost,
+        costPerKg,
+        sellingPricePerKg,
+      });
 
-    fullStockKg: Math.max(
-      product.fullStockKg,
-      newWeight
-    ),
+      await saveProduct(updatedProduct);
+
+      setProducts((currentProducts) =>
+        currentProducts.map((item) =>
+          item.id === productId ? updatedProduct : item,
+        ),
+      );
+
+      setSelectedProductId(null);
+      setAddStockProduct(null);
+    } catch (error) {
+      console.error("Failed to add stock:", error);
+    }
   };
-
-  try {
-    await saveProduct(updatedProduct);
-
-    setProducts((currentProducts) =>
-      currentProducts.map((item) =>
-        item.id === productId
-          ? updatedProduct
-          : item
-      )
-    );
-
-    setSelectedProductId(null);
-    setAddStockProduct(null);
-  } catch (error) {
-    console.error(
-      "Failed to add stock:",
-      error
-    );
-  }
-};
 
 return (
   <>

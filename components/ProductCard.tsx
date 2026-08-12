@@ -1,8 +1,8 @@
 import {
+  Image,
   Pressable,
   StyleSheet,
   Text,
-  Image,
   View,
 } from "react-native";
 
@@ -12,7 +12,7 @@ export type Product = {
   weightKg: number;
   fullStockKg: number;
   pricePerKg: number;
-  thumbnail: ReturnType<typeof require>;
+  imageUrl?: string;
 };
 
 type ProductCardProps = {
@@ -56,11 +56,19 @@ export default function ProductCard({
         needsReorder && styles.reorderCard,
       ]}
     >
-      <Image
-        source={product.thumbnail}
-        style={styles.productImage}
-        resizeMode="contain"
-      />
+      {product.imageUrl ? (
+        <Image
+          source={{ uri: product.imageUrl }}
+          style={styles.thumbnail}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={styles.thumbnailPlaceholder}>
+          <Text style={styles.thumbnailPlaceholderText}>
+            No image
+          </Text>
+        </View>
+      )}
 
       <View style={styles.productHeader}>
         <Text style={styles.productName}>
@@ -80,11 +88,11 @@ export default function ProductCard({
 
       <View style={styles.detailsRow}>
         <Text style={styles.price}>
-          GHS {product.pricePerKg.toFixed(2)} / kg
+          GHS {product.pricePerKg.toFixed(2)} /kg   
         </Text>
 
         <Text style={styles.productValue}>
-          GHS {productValue.toFixed(2)}
+        GHS {productValue.toFixed(2)}
         </Text>
       </View>
 
@@ -154,17 +162,31 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginBottom: 15,
     borderWidth: 1,
-    borderColor: "#e4dfd9",
+    borderColor: "green",
     overflow: "hidden",
   },
 
-  productImage: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-    width: 72,
-    height: 72,
-    zIndex: 1,
+  thumbnail: {
+    width: "100%",
+    height: 140,
+    borderRadius: 12,
+    marginBottom: 14,
+  },
+
+  thumbnailPlaceholder: {
+    width: "100%",
+    height: 140,
+    borderRadius: 12,
+    marginBottom: 14,
+    backgroundColor: "#eee9e4",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  thumbnailPlaceholderText: {
+    color: "#8a817a",
+    fontSize: 12,
+    fontWeight: "600",
   },
 
   reorderCard: {
@@ -209,6 +231,8 @@ const styles = StyleSheet.create({
   detailsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
+    gap: 20,
     marginTop: 6,
     paddingRight: 78,
   },

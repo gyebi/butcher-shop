@@ -1,0 +1,52 @@
+import {
+  addDoc,
+  collection,
+  getFirestore,
+  serverTimestamp,
+} from "@react-native-firebase/firestore";
+
+export type CreateStockBatchInput = {
+  productId: string;
+  productName: string;
+  weightReceivedKg: number;
+  totalPurchaseCost: number;
+  costPerKg: number;
+  sellingPricePerKg: number;
+};
+
+export async function createStockBatch(
+  batch: CreateStockBatchInput
+) {
+  const db = getFirestore();
+
+  const batchRef = await addDoc(
+    collection(db, "stockBatches"),
+    {
+      productId: batch.productId,
+      productName: batch.productName,
+
+      weightReceivedKg:
+        batch.weightReceivedKg,
+
+      // We keep this separately because later
+      // sales can reduce the remaining quantity
+      // without destroying the original receipt weight.
+      remainingWeightKg:
+        batch.weightReceivedKg,
+
+      totalPurchaseCost:
+        batch.totalPurchaseCost,
+
+      costPerKg:
+        batch.costPerKg,
+
+      sellingPricePerKg:
+        batch.sellingPricePerKg,
+
+      receivedAt:
+        serverTimestamp(),
+    }
+  );
+
+  return batchRef.id;
+}

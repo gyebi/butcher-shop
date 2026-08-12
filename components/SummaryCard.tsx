@@ -48,7 +48,7 @@ const styles = StyleSheet.create({
 
   value: {
     color: "#e9b949",
-    fontSize: 21,
+    fontSize: 34,
     fontWeight: "700",
     marginTop: 4,
   },

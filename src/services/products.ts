@@ -13,6 +13,7 @@ export type ProductRecord = {
   weightKg: number;
   fullStockKg: number;
   pricePerKg: number;
+  imageUrl?: string;
 };
 
 const COLLECTION_NAME = "products";
@@ -48,6 +49,11 @@ export async function loadProducts(): Promise<ProductRecord[]> {
         typeof data.pricePerKg === "number"
           ? data.pricePerKg
           : 0,
+
+      imageUrl:
+        typeof data.imageUrl === "string"
+          ? data.imageUrl
+          : undefined,
     };
   });
 }
@@ -67,6 +73,7 @@ export async function saveProduct(
       weightKg: product.weightKg,
       fullStockKg: product.fullStockKg,
       pricePerKg: product.pricePerKg,
+      imageUrl: product.imageUrl ?? null,
       updatedAt: serverTimestamp(),
     },
     {
