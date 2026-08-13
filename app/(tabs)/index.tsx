@@ -35,7 +35,7 @@ const seedProductData: Product[] = [
     weightKg: 40,
     fullStockKg: 50,
     pricePerKg: 25,
-    thumbnail: require("../../assets/images/chicken-back.png"),
+    imagePath: "products/chicken-back.jpg",
   },
   {
     id: "2",
@@ -43,7 +43,7 @@ const seedProductData: Product[] = [
     weightKg: 18,
     fullStockKg: 30,
     pricePerKg: 40,
-    thumbnail: require("../../assets/images/sausage.png"),
+    imagePath: "products/gozde-sausage.jpg",
   },
   {
     id: "3",
@@ -51,7 +51,7 @@ const seedProductData: Product[] = [
     weightKg: 8,
     fullStockKg: 40,
     pricePerKg: 35,
-    thumbnail: require("../../assets/images/beef-tripe.png"),
+    imagePath: "products/beef-tripe.jpg",
   },
   {
     id: "4",
@@ -59,32 +59,9 @@ const seedProductData: Product[] = [
     weightKg: 22,
     fullStockKg: 30,
     pricePerKg: 32,
-    thumbnail: require("../../assets/images/chicken-drumsticks.png"),
+    imagePath: "products/chicken-drumsticks.jpg",
   },
 ];
-
-function hydrateProducts(
-  records: Array<{
-    id: string;
-    name: string;
-    weightKg: number;
-    fullStockKg: number;
-    pricePerKg: number;
-  }>,
-) {
-  return records.map((record) => {
-    const seededProduct = seedProductData.find(
-      (product) => product.id === record.id,
-    );
-
-    return {
-      ...record,
-      thumbnail:
-        seededProduct?.thumbnail ??
-        require("../../assets/images/favicon.png"),
-    };
-  });
-}
 
 export default function HomeScreen() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -135,7 +112,7 @@ export default function HomeScreen() {
           savedProducts = await loadProducts();
         }
 
-        setProducts(hydrateProducts(savedProducts));
+        setProducts(savedProducts);
       } catch (error) {
         console.error("Failed to load products:", error);
 

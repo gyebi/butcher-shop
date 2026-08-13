@@ -12,6 +12,7 @@ export type Product = {
   weightKg: number;
   fullStockKg: number;
   pricePerKg: number;
+  imagePath?: string;
   imageUrl?: string;
 };
 

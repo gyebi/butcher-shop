@@ -7,12 +7,15 @@ import {
   setDoc,
 } from "@react-native-firebase/firestore";
 
+import { getProductImageUrl } from "@/src/services/product-images";
+
 export type ProductRecord = {
   id: string;
   name: string;
   weightKg: number;
   fullStockKg: number;
   pricePerKg: number;
+  imagePath?: string;
   imageUrl?: string;
 };
 
@@ -25,8 +28,17 @@ export async function loadProducts(): Promise<ProductRecord[]> {
     collection(db, COLLECTION_NAME)
   );
 
-  return snapshot.docs.map((document) => {
+  return Promise.all(snapshot.docs.map(async (document) => {
     const data = document.data();
+
+    const imagePath =
+      typeof data.imagePath === "string"
+        ? data.imagePath
+        : undefined;
+
+    const imageUrl = imagePath
+      ? await getProductImageUrl(imagePath)
+      : undefined;
 
     return {
       id: document.id,
@@ -50,12 +62,10 @@ export async function loadProducts(): Promise<ProductRecord[]> {
           ? data.pricePerKg
           : 0,
 
-      imageUrl:
-        typeof data.imageUrl === "string"
-          ? data.imageUrl
-          : undefined,
+      imagePath,
+      imageUrl,
     };
-  });
+  }));
 }
 
 export async function saveProduct(
@@ -73,7 +83,7 @@ export async function saveProduct(
       weightKg: product.weightKg,
       fullStockKg: product.fullStockKg,
       pricePerKg: product.pricePerKg,
-      imageUrl: product.imageUrl ?? null,
+      imagePath: product.imagePath ?? null,
       updatedAt: serverTimestamp(),
     },
     {
