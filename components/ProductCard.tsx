@@ -59,13 +59,23 @@ export default function ProductCard({
     >
       {product.imageUrl ? (
         <Image
-          source={{ uri: product.imageUrl }}
+          source={{
+            uri: product.imageUrl,
+          }}
           style={styles.thumbnail}
           resizeMode="cover"
         />
       ) : (
-        <View style={styles.thumbnailPlaceholder}>
-          <Text style={styles.thumbnailPlaceholderText}>
+        <View
+          style={
+            styles.thumbnailPlaceholder
+          }
+        >
+          <Text
+            style={
+              styles.thumbnailPlaceholderText
+            }
+          >
             No image
           </Text>
         </View>
@@ -89,11 +99,11 @@ export default function ProductCard({
 
       <View style={styles.detailsRow}>
         <Text style={styles.price}>
-          GHS {product.pricePerKg.toFixed(2)} /kg   
+          GHS {product.pricePerKg.toFixed(2)} /kg
         </Text>
 
         <Text style={styles.productValue}>
-        GHS {productValue.toFixed(2)}
+          GHS {productValue.toFixed(2)}
         </Text>
       </View>
 
@@ -168,27 +178,27 @@ const styles = StyleSheet.create({
   },
 
   thumbnail: {
-    width: "100%",
-    height: 140,
-    borderRadius: 12,
-    marginBottom: 14,
-  },
+  width: "100%",
+  height: 140,
+  borderRadius: 12,
+  marginBottom: 14,
+},
 
-  thumbnailPlaceholder: {
-    width: "100%",
-    height: 140,
-    borderRadius: 12,
-    marginBottom: 14,
-    backgroundColor: "#eee9e4",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+thumbnailPlaceholder: {
+  width: "100%",
+  height: 140,
+  borderRadius: 12,
+  marginBottom: 14,
+  backgroundColor: "#eee9e4",
+  alignItems: "center",
+  justifyContent: "center",
+},
 
-  thumbnailPlaceholderText: {
-    color: "#8a817a",
-    fontSize: 12,
-    fontWeight: "600",
-  },
+thumbnailPlaceholderText: {
+  color: "#8a817a",
+  fontSize: 12,
+  fontWeight: "600",
+},
 
   reorderCard: {
     backgroundColor: "#ffe5e5",

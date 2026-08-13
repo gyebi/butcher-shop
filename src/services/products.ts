@@ -28,20 +28,12 @@ export async function loadProducts(): Promise<ProductRecord[]> {
     collection(db, COLLECTION_NAME)
   );
 
-  return Promise.all(snapshot.docs.map(async (document) => {
+  const products = snapshot.docs.map((document) => {
     const data = document.data();
-
-    const imagePath =
-      typeof data.imagePath === "string"
-        ? data.imagePath
-        : undefined;
-
-    const imageUrl = imagePath
-      ? await getProductImageUrl(imagePath)
-      : undefined;
 
     return {
       id: document.id,
+
       name:
         typeof data.name === "string"
           ? data.name
@@ -62,10 +54,34 @@ export async function loadProducts(): Promise<ProductRecord[]> {
           ? data.pricePerKg
           : 0,
 
-      imagePath,
-      imageUrl,
+      imagePath:
+        typeof data.imagePath === "string"
+          ? data.imagePath
+          : undefined,
     };
-  }));
+  });
+
+  const productsWithImages =
+    await Promise.all(
+      products.map(async (product) => {
+        if (!product.imagePath) {
+          return product;
+        }
+
+        const imageUrl =
+          await getProductImageUrl(
+            product.imagePath
+          );
+
+        return {
+          ...product,
+          imageUrl:
+            imageUrl ?? undefined,
+        };
+      })
+    );
+
+  return productsWithImages;
 }
 
 export async function saveProduct(
