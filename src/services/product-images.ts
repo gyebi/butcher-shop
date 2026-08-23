@@ -1,41 +1,17 @@
 import {
   getDownloadURL,
   getStorage,
+  putFile,
   ref,
 } from "@react-native-firebase/storage";
 
 export async function getProductImageUrl(
   imagePath: string
 ): Promise<string | null> {
-
-  try{
-    console.log("imagepath" , imagePath)
-
-    //comments: check 1
-  const storage = getStorage();
-
-  const imageRef = ref(
-    storage,
-    imagePath
-  );
-
-  //comments: check 2
-  console.log(
-      "STORAGE REF:",
-      imageRef.fullPath);
-
-  
-    const url = await getDownloadURL(
-      imageRef
-    );
-
-    console.log(
-      "IMAGE DOWNLOAD URL:",
-      url
-    );
-
-    return url;
-
+  try {
+    const storage = getStorage();
+    const imageRef = ref(storage, imagePath);
+    return await getDownloadURL(imageRef);
   } catch (error) {
     console.error(
       "Failed to load product image:",
@@ -45,4 +21,26 @@ export async function getProductImageUrl(
 
     return null;
   }
+}
+
+export async function uploadProductImage(
+  productId: string,
+  localUri: string
+) {
+  const storage = getStorage();
+
+  const imagePath = `products/product-${productId}.jpg`;
+  const imageRef = ref(storage, imagePath);
+  const localPath = localUri.replace("file://", "");
+
+  await putFile(imageRef, localPath, {
+    contentType: "image/jpeg",
+  });
+
+  const imageUrl = await getDownloadURL(imageRef);
+
+  return {
+    imagePath,
+    imageUrl,
+  };
 }

@@ -1,52 +1,176 @@
 import {
-  addDoc,
   collection,
+  doc,
   getFirestore,
+  runTransaction,
   serverTimestamp,
 } from "@react-native-firebase/firestore";
 
-export type CreateStockBatchInput = {
+export type AddStockInput = {
   productId: string;
-  productName: string;
-  weightReceivedKg: number;
+  addedWeightKg: number;
   totalPurchaseCost: number;
   costPerKg: number;
   sellingPricePerKg: number;
 };
 
-export async function createStockBatch(
-  batch: CreateStockBatchInput
-) {
+export type AddStockResult = {
+  batchId: string;
+  newWeightKg: number;
+  sellingPricePerKg: number;
+  fullStockKg: number;
+};
+
+export async function addStockTransaction({
+  productId,
+  addedWeightKg,
+  totalPurchaseCost,
+  costPerKg,
+  sellingPricePerKg,
+}: AddStockInput): Promise<AddStockResult> {
+  if (
+    !Number.isFinite(addedWeightKg) ||
+    addedWeightKg <= 0
+  ) {
+    throw new Error("Invalid stock weight.");
+  }
+
+  if (
+    !Number.isFinite(totalPurchaseCost) ||
+    totalPurchaseCost <= 0
+  ) {
+    throw new Error(
+      "Invalid purchase cost."
+    );
+  }
+
+  if (
+    !Number.isFinite(costPerKg) ||
+    costPerKg <= 0
+  ) {
+    throw new Error(
+      "Invalid cost per kg."
+    );
+  }
+
+  if (
+    !Number.isFinite(sellingPricePerKg) ||
+    sellingPricePerKg <= 0
+  ) {
+    throw new Error(
+      "Invalid selling price."
+    );
+  }
+
   const db = getFirestore();
 
-  const batchRef = await addDoc(
-    collection(db, "stockBatches"),
-    {
-      productId: batch.productId,
-      productName: batch.productName,
+  const productRef = doc(
+    collection(db, "products"),
+    productId
+  );
 
-      weightReceivedKg:
-        batch.weightReceivedKg,
+  // Generate the batch ID before entering
+  // the transaction.
+  const batchRef = doc(
+    collection(db, "stockBatches")
+  );
 
-      // We keep this separately because later
-      // sales can reduce the remaining quantity
-      // without destroying the original receipt weight.
-      remainingWeightKg:
-        batch.weightReceivedKg,
+  const result = await runTransaction(
+    db,
+    async (transaction) => {
+      const productSnapshot =
+        await transaction.get(productRef);
 
-      totalPurchaseCost:
-        batch.totalPurchaseCost,
+      if (!productSnapshot.exists()) {
+        throw new Error(
+          "Product not found."
+        );
+      }
 
-      costPerKg:
-        batch.costPerKg,
+      const product =
+        productSnapshot.data();
 
-      sellingPricePerKg:
-        batch.sellingPricePerKg,
+      const currentWeightKg =
+        typeof product.weightKg === "number"
+          ? product.weightKg
+          : 0;
 
-      receivedAt:
-        serverTimestamp(),
+      const currentFullStockKg =
+        typeof product.fullStockKg === "number"
+          ? product.fullStockKg
+          : 0;
+
+      const productName =
+        typeof product.name === "string"
+          ? product.name
+          : "Unknown Product";
+
+      const newWeightKg =
+        Math.round(
+          (currentWeightKg +
+            addedWeightKg) *
+            1000
+        ) / 1000;
+
+      const roundedSellingPrice =
+        Math.round(
+          sellingPricePerKg * 100
+        ) / 100;
+
+      const newFullStockKg =
+        Math.max(
+          currentFullStockKg,
+          newWeightKg
+        );
+
+      // Update current dashboard state.
+      transaction.update(productRef, {
+        weightKg: newWeightKg,
+        fullStockKg: newFullStockKg,
+        pricePerKg:
+          roundedSellingPrice,
+        updatedAt:
+          serverTimestamp(),
+      });
+
+      // Preserve this specific purchase forever.
+      transaction.set(batchRef, {
+        productId,
+        productName,
+
+        weightReceivedKg:
+          addedWeightKg,
+
+        remainingWeightKg:
+          addedWeightKg,
+
+        totalPurchaseCost,
+
+        costPerKg,
+
+        sellingPricePerKg:
+          roundedSellingPrice,
+
+        stockBeforeKg:
+          currentWeightKg,
+
+        stockAfterKg:
+          newWeightKg,
+
+        receivedAt:
+          serverTimestamp(),
+      });
+
+      return {
+        batchId: batchRef.id,
+        newWeightKg,
+        sellingPricePerKg:
+          roundedSellingPrice,
+        fullStockKg:
+          newFullStockKg,
+      };
     }
   );
 
-  return batchRef.id;
+  return result;
 }

@@ -23,6 +23,7 @@ type ProductCardProps = {
   onPress: () => void;
   onSell: () => void;
   onAdd: () => void;
+  onChooseImage: () => void;
 };
 
 export default function ProductCard({
@@ -32,6 +33,7 @@ export default function ProductCard({
   onPress,
   onSell,
   onAdd,
+  onChooseImage,
 }: ProductCardProps) {
   const stockPercentage =
     product.fullStockKg > 0
@@ -57,29 +59,36 @@ export default function ProductCard({
         needsReorder && styles.reorderCard,
       ]}
     >
-      {product.imageUrl ? (
-        <Image
-          source={{
-            uri: product.imageUrl,
-          }}
-          style={styles.thumbnail}
-          resizeMode="cover"
-        />
-      ) : (
-        <View
-          style={
-            styles.thumbnailPlaceholder
-          }
-        >
-          <Text
+      <Pressable
+        onPress={(event) => {
+          event.stopPropagation();
+          onChooseImage();
+        }}
+      >
+        {product.imageUrl ? (
+          <Image
+            source={{
+              uri: product.imageUrl,
+            }}
+            style={styles.thumbnail}
+            resizeMode="cover"
+          />
+        ) : (
+          <View
             style={
-              styles.thumbnailPlaceholderText
+              styles.thumbnailPlaceholder
             }
           >
-            No image
-          </Text>
-        </View>
-      )}
+            <Text
+              style={
+                styles.thumbnailPlaceholderText
+              }
+            >
+              Tap to add image
+            </Text>
+          </View>
+        )}
+      </Pressable>
 
       <View style={styles.productHeader}>
         <Text style={styles.productName}>
@@ -194,11 +203,26 @@ thumbnailPlaceholder: {
   justifyContent: "center",
 },
 
-thumbnailPlaceholderText: {
+  thumbnailPlaceholderText: {
   color: "#8a817a",
   fontSize: 12,
   fontWeight: "600",
 },
+
+  imageAction: {
+    alignSelf: "flex-start",
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#f0ece7",
+  },
+
+  imageActionText: {
+    color: "#5d554f",
+    fontSize: 12,
+    fontWeight: "700",
+  },
 
   reorderCard: {
     backgroundColor: "#ffe5e5",

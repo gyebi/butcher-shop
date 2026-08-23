@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import * as ImagePicker from "expo-image-picker";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   loadBusinessSettings,
@@ -7,61 +8,31 @@ import {
 
 import {
   loadProducts,
-  saveProduct,
-  seedProducts,
+  updateProductImage,
 } from "@/src/services/products";
 
-import { createStockBatch } from "@/src/services/stock-batches";
+import {
+  uploadProductImage,
+} from "@/src/services/product-images";
+import { addStockTransaction } from "@/src/services/stock-batches";
 
 import {
-  Pressable,
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
-  View,
+  View
 } from "react-native";
 
 import ProductCard, { Product } from "../../components/ProductCard";
 
+import SettingsModal from "@/components/SettingsModal";
+import AddStockModal from "../../components/AddStockModal";
 import SellModal from "../../components/SellModal";
 import SummaryCard from "../../components/SummaryCard";
-import AddStockModal from "../../components/AddStockModal";
-import SettingsModal from "@/components/SettingsModal";
 
-const seedProductData: Product[] = [
-  {
-    id: "1",
-    name: "Chicken Back",
-    weightKg: 40,
-    fullStockKg: 50,
-    pricePerKg: 25,
-    imagePath: "products/chicken-back.jpg",
-  },
-  {
-    id: "2",
-    name: "Gozde Sausage",
-    weightKg: 18,
-    fullStockKg: 30,
-    pricePerKg: 40,
-    imagePath: "products/gozde-sausage.jpg",
-  },
-  {
-    id: "3",
-    name: "Beef Tripe",
-    weightKg: 8,
-    fullStockKg: 40,
-    pricePerKg: 35,
-    imagePath: "products/beef-tripe.jpg",
-  },
-  {
-    id: "4",
-    name: "Chicken Drumsticks",
-    weightKg: 22,
-    fullStockKg: 30,
-    pricePerKg: 32,
-    imagePath: "products/chicken-drumsticks.jpg",
-  },
-];
+import { useFocusEffect } from "@react-navigation/native";
+import { completeSaleTransaction } from "@/src/services/sales";
 
 export default function HomeScreen() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -101,23 +72,13 @@ export default function HomeScreen() {
     loadSettings();
   }, []);
 
-
   useEffect(() => {
     async function initialiseProducts() {
       try {
-        let savedProducts = await loadProducts();
-
-        if (savedProducts.length === 0) {
-          await seedProducts(seedProductData);
-          savedProducts = await loadProducts();
-        }
-
+        const savedProducts = await loadProducts();
         setProducts(savedProducts);
       } catch (error) {
         console.error("Failed to load products:", error);
-
-        // Temporary fallback while developing.
-        setProducts(seedProductData);
       } finally {
         setProductsLoading(false);
       }
@@ -125,6 +86,159 @@ export default function HomeScreen() {
 
     initialiseProducts();
   }, []);
+
+  const refreshProducts = useCallback(async () => {
+    try {
+      setProductsLoading(true);
+
+      const loadedProducts = await loadProducts();
+
+      setProducts(loadedProducts);
+    } catch (error) {
+      console.error("Failed to load products:", error);
+    } finally {
+      setProductsLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshProducts();
+    }, [refreshProducts]),
+  );
+
+
+  const uploadSelectedImage = async (
+    product: Product,
+    localUri: string
+  ) => {
+    const { imagePath, imageUrl } =
+      await uploadProductImage(
+        product.id,
+        localUri
+      );
+
+    await updateProductImage(
+      product.id,
+      imagePath
+    );
+
+    setProducts((currentProducts) =>
+      currentProducts.map((item) =>
+        item.id === product.id
+          ? {
+            ...item,
+            imagePath,
+            imageUrl,
+          }
+          : item
+      )
+    );
+  };
+
+  const chooseImageFromGallery = async (
+    product: Product
+  ) => {
+    try {
+      const result =
+        await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: "images",
+          allowsEditing: true,
+          aspect: [4, 3],
+          quality: 0.8,
+        });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const asset = result.assets[0];
+
+      if (!asset?.uri) {
+        return;
+      }
+
+      await uploadSelectedImage(
+        product,
+        asset.uri
+      );
+    } catch (error) {
+      console.error(
+        "Failed to choose image:",
+        error
+      );
+    }
+  };
+
+  const takeProductPhoto = async (
+    product: Product
+  ) => {
+    try {
+      const permission =
+        await ImagePicker.requestCameraPermissionsAsync();
+
+      if (!permission.granted) {
+        Alert.alert(
+          "Camera permission required",
+          "Please allow camera access to take a product photo."
+        );
+
+        return;
+      }
+
+      const result =
+        await ImagePicker.launchCameraAsync({
+          allowsEditing: true,
+          aspect: [4, 3],
+          quality: 0.8,
+        });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const asset = result.assets[0];
+
+      if (!asset?.uri) {
+        return;
+      }
+
+      await uploadSelectedImage(
+        product,
+        asset.uri
+      );
+    } catch (error) {
+      console.error(
+        "Failed to take product photo:",
+        error
+      );
+    }
+  };
+
+  const handleChooseImage = (
+    product: Product
+  ) => {
+    Alert.alert(
+      "Product Image",
+      `Update image for ${product.name}`,
+      [
+        {
+          text: "Choose from Gallery",
+          onPress: () =>
+            chooseImageFromGallery(product),
+        },
+        {
+          text: "Take Photo",
+          onPress: () =>
+            takeProductPhoto(product),
+        },
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+      ]
+    );
+  };
 
   const totalWeight = products.reduce(
     (total, product) => total + product.weightKg,
@@ -148,47 +262,37 @@ export default function HomeScreen() {
     productId: string,
     weightKg: number
   ) => {
-    const product =
-      products.find(
-        (item) => item.id === productId
-      );
-
-    if (!product) {
-      return;
-    }
-
-    if (
-      weightKg <= 0 ||
-      weightKg > product.weightKg
-    ) {
-      return;
-    }
-
-    const updatedProduct = {
-      ...product,
-      weightKg:
-        Math.round(
-          (product.weightKg - weightKg) *
-          1000
-        ) / 1000,
-    };
-
     try {
-      await saveProduct(updatedProduct);
+      const result =
+        await completeSaleTransaction({
+          productId,
+          weightKg,
+        });
 
       setProducts((currentProducts) =>
-        currentProducts.map((item) =>
-          item.id === productId
-            ? updatedProduct
-            : item
+        currentProducts.map((product) =>
+          product.id === productId
+            ? {
+              ...product,
+              weightKg:
+                result.remainingWeightKg,
+            }
+            : product
         )
       );
 
       setSelectedProductId(null);
       setSellProduct(null);
+
+      console.log(
+        "SALE SAVED:",
+        result.saleId,
+        "GHS",
+        result.totalAmount
+      );
     } catch (error) {
       console.error(
-        "Failed to save sale stock update:",
+        "Sale failed:",
         error
       );
     }
@@ -207,131 +311,128 @@ export default function HomeScreen() {
     costPerKg: number;
     sellingPricePerKg: number;
   }) => {
-    const product = products.find((item) => item.id === productId);
-
-    if (!product) {
-      return;
-    }
-
-    if (
-      addedWeightKg <= 0 ||
-      totalPurchaseCost <= 0 ||
-      costPerKg <= 0 ||
-      sellingPricePerKg <= 0
-    ) {
-      return;
-    }
-
-    const newWeight = product.weightKg + addedWeightKg;
-
-    const updatedProduct = {
-      ...product,
-      weightKg: Math.round(newWeight * 1000) / 1000,
-      pricePerKg: Math.round(sellingPricePerKg * 100) / 100,
-      fullStockKg: Math.max(product.fullStockKg, newWeight),
-    };
-
     try {
-      await createStockBatch({
-        productId: product.id,
-        productName: product.name,
-        weightReceivedKg: addedWeightKg,
-        totalPurchaseCost,
-        costPerKg,
-        sellingPricePerKg,
-      });
-
-      await saveProduct(updatedProduct);
+      const result =
+        await addStockTransaction({
+          productId,
+          addedWeightKg,
+          totalPurchaseCost,
+          costPerKg,
+          sellingPricePerKg,
+        });
 
       setProducts((currentProducts) =>
-        currentProducts.map((item) =>
-          item.id === productId ? updatedProduct : item,
-        ),
+        currentProducts.map((product) =>
+          product.id === productId
+            ? {
+              ...product,
+              weightKg:
+                result.newWeightKg,
+
+              pricePerKg:
+                result.sellingPricePerKg,
+
+              fullStockKg:
+                result.fullStockKg,
+            }
+            : product
+        )
       );
 
       setSelectedProductId(null);
-      setAddStockProduct(null);
+      setProductsLoading(false);
+
+      console.log(
+        "STOCK ADDED:",
+        result.batchId
+      );
     } catch (error) {
-      console.error("Failed to add stock:", error);
+      console.error(
+        "Add stock failed:",
+        error
+      );
     }
   };
 
-return (
-  <>
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-    >
-      <Text style={styles.title}>Lizzy's Butcher Shop</Text>
+  return (
+    <>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+      >
+        <Text style={styles.title}>Lizzys Butcher Shop</Text>
 
-      <SummaryCard totalWeight={totalWeight} totalValue={totalValue} />
+        <SummaryCard totalWeight={totalWeight} totalValue={totalValue} />
 
-      <Text style={styles.sectionTitle}>Products</Text>
+        <Text style={styles.sectionTitle}>Products</Text>
 
-      {products.map((product) => (
-        <ProductCard
-          key={product.id}
-          product={product}
-          reorderPercent={reorderPercent}
-          isSelected={selectedProductId === product.id}
-          onPress={() => {
-            setSelectedProductId(
-              selectedProductId === product.id ? null : product.id,
-            );
-          }}
-          onSell={() => {
-            setSellProduct(product);
-          }}
-          onAdd={() => {
-            setAddStockProduct(product);
-          }}
-        />
-      ))}
-    </ScrollView>
+        {products.map((product) => (
+          <ProductCard
+            key={product.id}
+            product={product}
+            reorderPercent={reorderPercent}
+            isSelected={selectedProductId === product.id}
+            onPress={() => {
+              setSelectedProductId(
+                selectedProductId === product.id ? null : product.id,
+              );
+            }}
+            onSell={() => {
+              setSellProduct(product);
+            }}
+            onAdd={() => {
+              setAddStockProduct(product);
+            }}
+            onChooseImage={() => {
+              handleChooseImage(product);
+            }}
+          />
+        ))}
+      </ScrollView>
 
-    <SellModal
-      product={sellProduct}
-      onClose={() => {
-        setSellProduct(null);
-      }}
-      onConfirm={handleSale}
-    />
+      <SellModal
+        product={sellProduct}
+        onClose={() => {
+          setSellProduct(null);
+        }}
+        onConfirm={handleSale}
+      />
 
-    <AddStockModal
-      product={addStockProduct}
-      defaultMarkupPercent={markupPercent}
-      onClose={() => {
-        setAddStockProduct(null);
-      }}
-      onConfirm={handleAddStock}
-    />
+      <AddStockModal
+        product={addStockProduct}
+        defaultMarkupPercent={markupPercent}
+        onClose={() => {
+          setAddStockProduct(null);
+        }}
+        onConfirm={handleAddStock}
+      />
 
-    <SettingsModal
-      visible={settingsVisible}
-      reorderPercent={reorderPercent}
-      markupPercent={markupPercent}
-      voiceEnabled={voiceEnabled}
-      onClose={() => {
-        setSettingsVisible(false);
-      }}
-      onSave={async (settings) => {
-        try {
-          await saveBusinessSettings(settings);
-
-          setReorderPercent(settings.reorderPercent);
-
-          setMarkupPercent(settings.markupPercent);
-
-          setVoiceEnabled(settings.voiceEnabled);
-
+      <SettingsModal
+        visible={settingsVisible}
+        reorderPercent={reorderPercent}
+        markupPercent={markupPercent}
+        voiceEnabled={voiceEnabled}
+        onClose={() => {
           setSettingsVisible(false);
-        } catch (error) {
-          console.error("Failed to save settings:", error);
-        }
-      }}
-    />
-  </>
-);
+        }}
+        onSave={async (settings) => {
+          try {
+            await saveBusinessSettings(settings);
+
+            setReorderPercent(settings.reorderPercent);
+
+            setMarkupPercent(settings.markupPercent);
+
+            setVoiceEnabled(settings.voiceEnabled);
+
+            setSettingsVisible(false);
+          } catch (error) {
+            console.error("Failed to save settings:", error);
+          }
+        }}
+      />
+    </>
+  );
 }
 
 const styles = StyleSheet.create({
