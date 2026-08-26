@@ -14,6 +14,11 @@ import {
   saveBusinessSettings,
 } from "@/src/services/settings";
 
+import {
+  getPrinterSettings,
+  savePrinterSettings,
+} from "@/src/db/repositories/printer-settings-repository";
+
 export default function SettingsScreen() {
   const [reorderInput, setReorderInput] = useState("20");
   const [markupInput, setMarkupInput] = useState("25");
@@ -23,6 +28,14 @@ export default function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
+  const [printerEnabled, setPrinterEnabled] = useState(false);
+  const [printerName, setPrinterName] = useState("");
+  const [printerAddress, setPrinterAddress] = useState("");
+  const [paperWidthInput, setPaperWidthInput] = useState("58");
+
+  const [printerSaving, setPrinterSaving] = useState(false);
+  const [printerMessage, setPrinterMessage] = useState("");
+
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
@@ -30,20 +43,66 @@ export default function SettingsScreen() {
       async function loadSettings() {
         try {
           setLoading(true);
+          setMessage("");
+          setPrinterMessage("");
 
-          const savedSettings = await loadBusinessSettings();
+          const [
+            savedBusinessSettings,
+            savedPrinterSettings,
+          ] = await Promise.all([
+            loadBusinessSettings(),
+            getPrinterSettings(),
+          ]);
 
-          if (!isActive || !savedSettings) {
+          if (!isActive) {
             return;
           }
 
-          setReorderInput(String(savedSettings.reorderPercent));
-          setMarkupInput(String(savedSettings.markupPercent));
-          setVoiceEnabled(savedSettings.voiceEnabled);
-          setMessage("");
+          if (savedBusinessSettings) {
+            setReorderInput(
+              String(savedBusinessSettings.reorderPercent)
+            );
+
+            setMarkupInput(
+              String(savedBusinessSettings.markupPercent)
+            );
+
+            setVoiceEnabled(
+              savedBusinessSettings.voiceEnabled
+            );
+          }
+
+          setPrinterEnabled(
+            savedPrinterSettings.enabled
+          );
+
+          setPrinterName(
+            savedPrinterSettings.printerName ?? ""
+          );
+
+          setPrinterAddress(
+            savedPrinterSettings.printerAddress ?? ""
+          );
+
+          setPaperWidthInput(
+            String(savedPrinterSettings.paperWidthMm)
+          );
+
+          console.log(
+            "Loaded printer settings:",
+            savedPrinterSettings
+          );
         } catch (error) {
-          console.error("Failed to load settings:", error);
-          setMessage("Could not load saved settings.");
+          console.error(
+            "Failed to load settings:",
+            error
+          );
+
+          if (isActive) {
+            setMessage(
+              "Could not load saved settings."
+            );
+          }
         } finally {
           if (isActive) {
             setLoading(false);
@@ -51,12 +110,12 @@ export default function SettingsScreen() {
         }
       }
 
-      loadSettings();
+      void loadSettings();
 
       return () => {
         isActive = false;
       };
-    }, []),
+    }, [])
   );
 
   const reorderPercent = Number(reorderInput);
@@ -104,6 +163,59 @@ export default function SettingsScreen() {
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSavePrinterSettings = async () => {
+    const paperWidthMm = Number(paperWidthInput);
+
+    if (
+      !Number.isFinite(paperWidthMm) ||
+      paperWidthMm <= 0
+    ) {
+      setPrinterMessage(
+        "Enter a valid paper width."
+      );
+      return;
+    }
+
+    try {
+      setPrinterSaving(true);
+      setPrinterMessage("");
+
+      await savePrinterSettings({
+        enabled: printerEnabled,
+        printerName: printerName.trim() || null,
+        printerAddress:
+          printerAddress.trim() || null,
+        connectionType: "BLUETOOTH",
+        paperWidthMm,
+        printWidthMm: null,
+        charset: null,
+        updatedAt: new Date().toISOString(),
+      });
+
+      const saved = await getPrinterSettings();
+
+      console.log(
+        "Printer settings after save:",
+        saved
+      );
+
+      setPrinterMessage(
+        "Printer settings saved."
+      );
+    } catch (error) {
+      console.error(
+        "Failed to save printer settings:",
+        error
+      );
+
+      setPrinterMessage(
+        "Could not save printer settings."
+      );
+    } finally {
+      setPrinterSaving(false);
     }
   };
 
@@ -198,7 +310,7 @@ export default function SettingsScreen() {
           style={[
             styles.voiceButton,
             voiceEnabled &&
-              styles.voiceButtonEnabled,
+            styles.voiceButtonEnabled,
           ]}
           onPress={() =>
             setVoiceEnabled((current) => !current)
@@ -208,7 +320,7 @@ export default function SettingsScreen() {
             style={[
               styles.voiceButtonText,
               voiceEnabled &&
-                styles.voiceButtonTextEnabled,
+              styles.voiceButtonTextEnabled,
             ]}
           >
             {voiceEnabled ? "ON" : "OFF"}
@@ -220,7 +332,7 @@ export default function SettingsScreen() {
           style={[
             styles.saveButton,
             !canSave &&
-              styles.saveButtonDisabled,
+            styles.saveButtonDisabled,
           ]}
           onPress={handleSave}
         >
@@ -237,6 +349,114 @@ export default function SettingsScreen() {
           </Text>
         )}
       </View>
+
+      <View style={styles.printerCard}>
+        <Text style={styles.sectionTitle}>
+          Receipt Printer
+        </Text>
+
+        <Text style={styles.sectionDescription}>
+          Configure the Bluetooth receipt printer
+          used with this POS tablet.
+        </Text>
+
+        <Text style={styles.label}>
+          Printer enabled
+        </Text>
+
+        <Pressable
+          style={[
+            styles.voiceButton,
+            printerEnabled &&
+            styles.voiceButtonEnabled,
+          ]}
+          onPress={() =>
+            setPrinterEnabled(
+              (current) => !current
+            )
+          }
+        >
+          <Text
+            style={[
+              styles.voiceButtonText,
+              printerEnabled &&
+              styles.voiceButtonTextEnabled,
+            ]}
+          >
+            {printerEnabled ? "ON" : "OFF"}
+          </Text>
+        </Pressable>
+
+        <Text style={styles.label}>
+          Printer name
+        </Text>
+
+        <TextInput
+          value={printerName}
+          onChangeText={setPrinterName}
+          placeholder="Select printer"
+          style={styles.textInput}
+          autoCapitalize="none"
+        />
+
+        <Text style={styles.label}>
+          Bluetooth address
+        </Text>
+
+        <TextInput
+          value={printerAddress}
+          onChangeText={setPrinterAddress}
+          placeholder="Not selected"
+          style={styles.textInput}
+          autoCapitalize="characters"
+        />
+
+        <Text style={styles.helper}>
+          This will eventually be filled automatically
+          when you choose a paired Bluetooth printer.
+        </Text>
+
+        <Text style={styles.label}>
+          Paper width
+        </Text>
+
+        <View style={styles.inputRow}>
+          <TextInput
+            value={paperWidthInput}
+            onChangeText={setPaperWidthInput}
+            keyboardType="number-pad"
+            style={styles.input}
+            selectTextOnFocus
+          />
+
+          <Text style={styles.suffix}>
+            mm
+          </Text>
+        </View>
+
+        <Pressable
+          style={[
+            styles.saveButton,
+            printerSaving &&
+            styles.saveButtonDisabled,
+          ]}
+          disabled={printerSaving}
+          onPress={handleSavePrinterSettings}
+        >
+          <Text style={styles.saveButtonText}>
+            {printerSaving
+              ? "SAVING..."
+              : "SAVE PRINTER SETTINGS"}
+          </Text>
+        </Pressable>
+
+        {printerMessage !== "" && (
+          <Text style={styles.message}>
+            {printerMessage}
+          </Text>
+        )}
+      </View>
+
     </ScrollView>
   );
 }
@@ -367,5 +587,37 @@ const styles = StyleSheet.create({
     textAlign: "center",
     color: "#367c4a",
     fontWeight: "700",
+  },
+
+  printerCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 18,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#e4dfd9",
+    marginTop: 20,
+  },
+
+  sectionTitle: {
+    fontSize: 21,
+    fontWeight: "800",
+    color: "#211c18",
+  },
+
+  sectionDescription: {
+    fontSize: 13,
+    color: "#817770",
+    marginTop: 5,
+    marginBottom: 4,
+  },
+
+  textInput: {
+    borderWidth: 2,
+    borderColor: "#d8d2cc",
+    borderRadius: 14,
+    paddingHorizontal: 15,
+    paddingVertical: 13,
+    fontSize: 16,
+    color: "#211c18",
   },
 });

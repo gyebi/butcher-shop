@@ -49,6 +49,26 @@ export async function initializeDatabase(): Promise<void> {
       ON products(active);
   `);
 
+  await db.execAsync(`
+  CREATE TABLE IF NOT EXISTS printer_settings (
+    id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+
+    enabled INTEGER NOT NULL DEFAULT 0,
+
+    printer_name TEXT,
+    printer_address TEXT,
+
+    connection_type TEXT NOT NULL DEFAULT 'BLUETOOTH',
+
+    paper_width_mm INTEGER NOT NULL DEFAULT 58,
+    print_width_mm INTEGER,
+
+    charset TEXT,
+
+    updated_at TEXT NOT NULL
+  );
+  `);
+
   const productColumns = await db.getAllAsync<{ name: string }>(
     `PRAGMA table_info(products);`
   );
@@ -83,3 +103,4 @@ export async function verifyDatabaseTables(): Promise<void> {
     tables.map((table) => table.name)
   );
 }
+
