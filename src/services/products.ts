@@ -8,8 +8,7 @@ import {
   setDoc,
 } from "@react-native-firebase/firestore";
 
-import { getProductImageUrl } from "@/src/services/product-images";
-import { getLocalProducts, saveLocalProduct } from "@/src/db/repositories/products-repository";
+import { getLocalProducts, saveLocalProduct, getLocalProductById } from "@/src/db/repositories/products-repository";
 
 
 export type ProductRecord = {
@@ -133,26 +132,11 @@ export async function loadProducts(): Promise<ProductRecord[]> {
       };
     });
 
-    const productsWithImages = await Promise.all(
-      products.map(async (product) => {
-        if (!product.imagePath) {
-          return product;
-        }
+    
+    await cacheProductsLocally(products);
 
-        const imageUrl = await getProductImageUrl(
-          product.imagePath
-        );
+    return products;
 
-        return {
-          ...product,
-          imageUrl: imageUrl ?? undefined,
-        };
-      })
-    );
-
-    await cacheProductsLocally(productsWithImages);
-
-    return productsWithImages;
   } catch (error) {
     console.warn(
       "Firebase product load failed. Falling back to SQLite.",
@@ -271,21 +255,57 @@ export async function cacheProductsLocally(
   products: ProductRecord[]
 ): Promise<void> {
   for (const product of products) {
+    const existingLocalProduct =
+      await getLocalProductById(product.id);
+
+    const hasPendingLocalChanges =
+      existingLocalProduct?.syncStatus === "PENDING";
+
     await saveLocalProduct({
       id: product.id,
       name: product.name,
-      categoryId: null,
-      sku: null,
-      sellingPricePesewas: Math.round(product.pricePerKg * 100),
-      costPricePesewas: null,
-      weightKg: product.weightKg,
-      fullStockKg: product.fullStockKg,
-      unit: "kg",
-      imagePath: product.imagePath ?? null,
-      localImageUri: null,
+
+      categoryId:
+        existingLocalProduct?.categoryId ?? null,
+
+      sku:
+        existingLocalProduct?.sku ?? null,
+
+      sellingPricePesewas: hasPendingLocalChanges
+        ? existingLocalProduct!.sellingPricePesewas
+        : Math.round(product.pricePerKg * 100),
+
+      costPricePesewas:
+        existingLocalProduct?.costPricePesewas ?? null,
+
+      weightKg: hasPendingLocalChanges
+        ? existingLocalProduct!.weightKg
+        : product.weightKg,
+
+      fullStockKg: hasPendingLocalChanges
+        ? existingLocalProduct!.fullStockKg
+        : product.fullStockKg,
+
+      unit:
+        existingLocalProduct?.unit ?? "kg",
+
+      imagePath:
+        product.imagePath ??
+        existingLocalProduct?.imagePath ??
+        null,
+
+      localImageUri:
+        existingLocalProduct?.localImageUri ?? null,
+
       active: true,
-      updatedAt: new Date().toISOString(),
-      syncStatus: "SYNCED",
+
+      updatedAt: hasPendingLocalChanges
+        ? existingLocalProduct!.updatedAt
+        : new Date().toISOString(),
+
+      syncStatus: hasPendingLocalChanges
+        ? "PENDING"
+        : "SYNCED",
     });
   }
 
@@ -295,5 +315,23 @@ export async function cacheProductsLocally(
     `Cached ${products.length} Firebase products into SQLite.`
   );
 
-  console.log("SQLite products after Firebase cache:", localProducts);
+  console.log(
+    "SQLite products after Firebase cache:",
+    localProducts
+  );
 }
+
+export async function loadLocalProducts(): Promise<ProductRecord[]> {
+  const localProducts = await getLocalProducts();
+
+  return localProducts.map((product) => ({
+    id: product.id,
+    name: product.name,
+    weightKg: product.weightKg,
+    fullStockKg: product.fullStockKg,
+    pricePerKg: product.sellingPricePesewas / 100,
+    imagePath: product.imagePath ?? undefined,
+    imageUrl: product.localImageUri ?? undefined,
+  }));
+}
+

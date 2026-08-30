@@ -13,6 +13,7 @@
       "bundleIdentifier": "com.auntielizzy.butcher"
     },
     "android": {
+    
       "package": "com.auntielizzy.butcher",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
@@ -21,6 +22,12 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
+        "permissions": [
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT"
+      ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },

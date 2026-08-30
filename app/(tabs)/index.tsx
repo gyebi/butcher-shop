@@ -1,5 +1,9 @@
+import { syncPendingChanges } from "@/src/services/sync";
+
 import * as ImagePicker from "expo-image-picker";
 import { useCallback, useEffect, useState } from "react";
+
+import { saveProductImageLocally } from "@/src/services/local-product-images";
 
 import {
   loadBusinessSettings,
@@ -9,19 +13,21 @@ import {
 import {
   loadProducts,
   updateProductImage,
+  loadLocalProducts,
 } from "@/src/services/products";
 
-import {
-  uploadProductImage,
-} from "@/src/services/product-images";
-import { addStockTransaction } from "@/src/services/stock-batches";
+import { updateLocalProductImage } from "@/src/db/repositories/products-repository";
+
+
+import { addLocalStockTransaction } from "@/src/services/local-stock";
 
 import {
   Alert,
   ScrollView,
   StyleSheet,
   Text,
-  View
+  View,
+  Pressable
 } from "react-native";
 
 import ProductCard, { Product } from "../../components/ProductCard";
@@ -32,9 +38,20 @@ import SellModal from "../../components/SellModal";
 import SummaryCard from "../../components/SummaryCard";
 
 import { useFocusEffect } from "@react-navigation/native";
-import { completeSaleTransaction } from "@/src/services/sales";
+import { completeLocalSaleTransaction } from "@/src/services/local-sales";
+import { printSaleReceipt } from "@/src/services/printer";
+
+
 
 export default function HomeScreen() {
+
+  type CartItem = {
+    productId: string;
+    productName: string;
+    weightKg: number;
+    pricePerKg: number;
+  };
+
   const [products, setProducts] = useState<Product[]>([]);
   const [productsLoading, setProductsLoading] = useState(true);
 
@@ -49,6 +66,14 @@ export default function HomeScreen() {
   const [reorderPercent, setReorderPercent] = useState(20);
   const [markupPercent, setMarkupPercent] = useState(25);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+
+  const [cart, setCart] = useState<CartItem[]>([]);
+
+
+
+  useEffect(() => {
+    void syncPendingChanges();
+  }, []);
 
   useEffect(() => {
     async function loadSettings() {
@@ -87,49 +112,76 @@ export default function HomeScreen() {
     initialiseProducts();
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      void syncPendingChanges();
+    }, [])
+  );
+
   const refreshProducts = useCallback(async () => {
     try {
-      setProductsLoading(true);
+      setProductsLoading(true)     // 1. Load SQLite immediately
+      const localProducts = await loadLocalProducts();
 
-      const loadedProducts = await loadProducts();
+      if (localProducts.length > 0) {
+        setProducts(localProducts);
+      }
 
-      setProducts(loadedProducts);
+      //local data is ready , so stop the loading state now 
+
+      setProductsLoading(false);
+
+      //refresh from Firebase in the background 
+
+      void loadProducts()
+        .then((freshProducts) => {
+          setProducts(freshProducts);
+        })
+        .catch((firebaseError) => {
+          console.log(
+            "Firebase unavailable. Continuing with local products.",
+            firebaseError,
+          );
+        });
+
     } catch (error) {
-      console.error("Failed to load products:", error);
-    } finally {
+      console.error(
+        "Failed to load local products:",
+        error,
+      );
+
       setProductsLoading(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      refreshProducts();
-    }, [refreshProducts]),
-  );
+  useEffect(() => {
+    void refreshProducts();
+  }, [refreshProducts]);
 
 
   const uploadSelectedImage = async (
     product: Product,
-    localUri: string
+    localUri: string,
+    fileName?: string | null,
+    mimeType?: string | null
   ) => {
-    const { imagePath, imageUrl } =
-      await uploadProductImage(
+    const savedLocalUri =
+      await saveProductImageLocally(
         product.id,
-        localUri
+        localUri,
+        fileName,
+        mimeType
       );
-
-    await updateProductImage(
+    await updateLocalProductImage(
       product.id,
-      imagePath
+      savedLocalUri
     );
-
     setProducts((currentProducts) =>
       currentProducts.map((item) =>
         item.id === product.id
           ? {
             ...item,
-            imagePath,
-            imageUrl,
+            imageUrl: savedLocalUri,
           }
           : item
       )
@@ -160,8 +212,11 @@ export default function HomeScreen() {
 
       await uploadSelectedImage(
         product,
-        asset.uri
+        asset.uri,
+        asset.fileName,
+        asset.mimeType
       );
+
     } catch (error) {
       console.error(
         "Failed to choose image:",
@@ -258,44 +313,60 @@ export default function HomeScreen() {
     );
   }
 
-  const handleSale = async (
+  const handleAddToCart = (
     productId: string,
-    weightKg: number
+    weightKg: number,
   ) => {
-    try {
-      const result =
-        await completeSaleTransaction({
-          productId,
-          weightKg,
-        });
+    const product = products.find(
+      (item) => item.id === productId,
+    );
 
-      setProducts((currentProducts) =>
-        currentProducts.map((product) =>
-          product.id === productId
-            ? {
-              ...product,
-              weightKg:
-                result.remainingWeightKg,
-            }
-            : product
-        )
-      );
-
-      setSelectedProductId(null);
-      setSellProduct(null);
-
-      console.log(
-        "SALE SAVED:",
-        result.saleId,
-        "GHS",
-        result.totalAmount
-      );
-    } catch (error) {
-      console.error(
-        "Sale failed:",
-        error
-      );
+    if (!product) {
+      return;
     }
+
+    setCart((currentCart) => {
+      const existingItem = currentCart.find(
+        (item) => item.productId === productId,
+      );
+
+      if (existingItem) {
+        const newWeight =
+          existingItem.weightKg + weightKg;
+
+        if (newWeight > product.weightKg) {
+          console.error(
+            `Only ${product.weightKg.toFixed(
+              2,
+            )} kg is available.`,
+          );
+
+          return currentCart;
+        }
+
+        return currentCart.map((item) =>
+          item.productId === productId
+            ? {
+              ...item,
+              weightKg: newWeight,
+            }
+            : item,
+        );
+      }
+
+      return [
+        ...currentCart,
+        {
+          productId,
+          productName: product.name,
+          weightKg,
+          pricePerKg: product.pricePerKg,
+        },
+      ];
+    });
+
+    setSelectedProductId(null);
+    setSellProduct(null);
   };
 
   const handleAddStock = async ({
@@ -312,14 +383,13 @@ export default function HomeScreen() {
     sellingPricePerKg: number;
   }) => {
     try {
-      const result =
-        await addStockTransaction({
-          productId,
-          addedWeightKg,
-          totalPurchaseCost,
-          costPerKg,
-          sellingPricePerKg,
-        });
+      const result = await addLocalStockTransaction({
+        productId,
+        addedWeightKg,
+        totalPurchaseCost,
+        costPerKg,
+        sellingPricePerKg,
+      });
 
       setProducts((currentProducts) =>
         currentProducts.map((product) =>
@@ -350,6 +420,84 @@ export default function HomeScreen() {
       console.error(
         "Add stock failed:",
         error
+      );
+    }
+  };
+
+  const cartTotal = cart.reduce(
+    (total, item) =>
+      total + item.weightKg * item.pricePerKg,
+    0,
+  );
+
+  const handleCompleteCartSale = async () => {
+    if (cart.length === 0) {
+      return;
+    }
+
+    try {
+      const result = await completeLocalSaleTransaction({
+        items: cart.map((item) => ({
+          productId: item.productId,
+          weightKg: item.weightKg,
+        })),
+      });
+
+      setProducts((currentProducts) =>
+        currentProducts.map((product) => {
+          const soldItem = result.items.find(
+            (item) => item.productId === product.id,
+          );
+
+          if (!soldItem) {
+            return product;
+          }
+
+          return {
+            ...product,
+            weightKg: soldItem.remainingWeightKg,
+          };
+        }),
+      );
+
+      console.log(
+        "SALE SAVED:",
+        result.saleId,
+        "ITEMS:",
+        result.items.length,
+        "GHS",
+        result.totalAmount,
+      );
+      try {
+        const printResult = await printSaleReceipt({
+          saleId: result.saleId,
+          items: result.items.map((item) => ({
+            productName: item.productName,
+            weightKg: item.weightKg,
+            pricePerKg: item.pricePerKg,
+            lineTotal: item.lineTotal,
+          })),
+          totalAmount: result.totalAmount,
+        });
+
+        console.log(
+          "RECEIPT PRINT:",
+          printResult,
+        );
+      } catch (printError) {
+        console.error(
+          "Sale saved, but receipt printing failed:",
+          printError,
+        );
+      }
+      setCart([]);
+
+      // Printing will go HERE.
+      // One print call for the entire transaction.
+    } catch (error) {
+      console.error(
+        "Sale failed:",
+        error,
       );
     }
   };
@@ -390,13 +538,68 @@ export default function HomeScreen() {
         ))}
       </ScrollView>
 
+
       <SellModal
         product={sellProduct}
         onClose={() => {
           setSellProduct(null);
         }}
-        onConfirm={handleSale}
+        onConfirm={handleAddToCart}
       />
+
+      {cart.length > 0 && (
+        <View style={styles.cartCard}>
+          <Text style={styles.cartTitle}>
+            Current Sale
+          </Text>
+
+          {cart.map((item) => {
+            const lineTotal =
+              item.weightKg * item.pricePerKg;
+
+            return (
+              <View
+                key={item.productId}
+                style={styles.cartItem}
+              >
+                <View style={styles.cartItemDetails}>
+                  <Text style={styles.cartItemName}>
+                    {item.productName}
+                  </Text>
+
+                  <Text style={styles.cartItemMeta}>
+                    {item.weightKg.toFixed(2)} kg × GHS{" "}
+                    {item.pricePerKg.toFixed(2)}
+                  </Text>
+                </View>
+
+                <Text style={styles.cartItemTotal}>
+                  GHS {lineTotal.toFixed(2)}
+                </Text>
+              </View>
+            );
+          })}
+
+          <View style={styles.cartTotalRow}>
+            <Text style={styles.cartTotalLabel}>
+              TOTAL
+            </Text>
+
+            <Text style={styles.cartTotalAmount}>
+              GHS {cartTotal.toFixed(2)}
+            </Text>
+          </View>
+
+          <Pressable
+            style={styles.completeCartButton}
+            onPress={handleCompleteCartSale}
+          >
+            <Text style={styles.completeCartButtonText}>
+              COMPLETE SALE
+            </Text>
+          </Pressable>
+        </View>
+      )}
 
       <AddStockModal
         product={addStockProduct}
@@ -459,7 +662,89 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 50,
   },
+  cartCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 18,
+    padding: 18,
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: "#e4dfd9",
+  },
 
+  cartTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#211c18",
+    marginBottom: 12,
+  },
+
+  cartItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee9e5",
+  },
+
+  cartItemDetails: {
+    flex: 1,
+    paddingRight: 12,
+  },
+
+  cartItemName: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#211c18",
+  },
+
+  cartItemMeta: {
+    marginTop: 3,
+    fontSize: 12,
+    color: "#726962",
+  },
+
+  cartItemTotal: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#211c18",
+  },
+
+  cartTotalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: 2,
+    borderTopColor: "#211c18",
+  },
+
+  cartTotalLabel: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#211c18",
+  },
+
+  cartTotalAmount: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#367c4a",
+  },
+
+  completeCartButton: {
+    marginTop: 18,
+    backgroundColor: "#367c4a",
+    paddingVertical: 16,
+    borderRadius: 13,
+    alignItems: "center",
+  },
+
+  completeCartButtonText: {
+    color: "#ffffff",
+    fontWeight: "800",
+    fontSize: 16,
+  },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",

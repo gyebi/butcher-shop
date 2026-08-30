@@ -21,6 +21,7 @@ type SellModalProps = {
   onConfirm: (productId: string, weightKg: number) => void;
 };
 
+
 export default function SellModal({
   product,
   onClose,
@@ -64,21 +65,7 @@ export default function SellModal({
     if (!product || !hasEnoughStock) {
       return;
     }
-
-    const cedis = Math.floor(amountDue);
-    const pesewas = Math.round(
-      (amountDue - cedis) * 100,
-    );
-
-    let speechText = `${cedis} Ghana cedis`;
-
-    if (pesewas > 0) {
-      speechText += ` and ${pesewas} pesewas`;
-    }
-
-    speechText += ". Medaase.";
-
-    void speakSaleTotal(speechText);
+  
     onConfirm(product.id, validWeight);
 
     setWeightInput("");
@@ -172,13 +159,14 @@ export default function SellModal({
                     styles.button,
                     styles.confirmButton,
                     !hasEnoughStock &&
-                      styles.disabledButton,
+                    styles.disabledButton,
                   ]}
                   onPress={handleConfirm}
                 >
                   <Text style={styles.confirmText}>
-                    COMPLETE SALE
+                    ADD TO CART
                   </Text>
+
                 </Pressable>
               </View>
             </ScrollView>

@@ -1,4 +1,3 @@
-
 import {
   collection,
   doc,
@@ -7,43 +6,89 @@ import {
   serverTimestamp,
 } from "@react-native-firebase/firestore";
 
+export type SaleTransactionItem = {
+  productId: string;
+  weightKg: number;
+};
+
+export type CompletedSaleItem = {
+  productId: string;
+  productName: string;
+  weightKg: number;
+  pricePerKg: number;
+  lineTotal: number;
+  stockBeforeKg: number;
+  remainingWeightKg: number;
+};
+
 export type SaleResult = {
   saleId: string;
-  remainingWeightKg: number;
   totalAmount: number;
+  items: CompletedSaleItem[];
 };
 
 export async function completeSaleTransaction({
-  productId,
-  weightKg,
+  items,
 }: {
-  productId: string;
-  weightKg: number;
+  items: SaleTransactionItem[];
 }): Promise<SaleResult> {
-  if (!Number.isFinite(weightKg) || weightKg <= 0) {
-    throw new Error("Invalid sale weight.");
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error("Sale must contain at least one item.");
+  }
+
+  for (const item of items) {
+    if (
+      !item.productId ||
+      !Number.isFinite(item.weightKg) ||
+      item.weightKg <= 0
+    ) {
+      throw new Error("Sale contains an invalid item.");
+    }
+  }
+
+  // For now, each product should appear once in the cart.
+  // The UI will combine repeated selections.
+  const productIds = items.map((item) => item.productId);
+
+  if (new Set(productIds).size !== productIds.length) {
+    throw new Error(
+      "The same product appears more than once in the sale.",
+    );
   }
 
   const db = getFirestore();
 
-  const productRef = doc(
-    collection(db, "products"),
-    productId
-  );
-
-  // Generate the ID before entering the transaction.
+  // Generate sale ID before the transaction.
   const saleRef = doc(collection(db, "sales"));
 
-  const result = await runTransaction(
-    db,
-    async (transaction) => {
-      // IMPORTANT:
-      // All reads happen before writes.
-      const productSnapshot =
-        await transaction.get(productRef);
+  return runTransaction(db, async (transaction) => {
+    /*
+     * IMPORTANT:
+     * Read ALL product documents first.
+     * Only after every read succeeds do we start writing.
+     */
+    const productSnapshots = await Promise.all(
+      items.map((item) => {
+        const productRef = doc(
+          collection(db, "products"),
+          item.productId,
+        );
+
+        return transaction.get(productRef);
+      }),
+    );
+
+    const completedItems: CompletedSaleItem[] = [];
+
+    /*
+     * Validate every item before writing anything.
+     */
+    for (let index = 0; index < items.length; index += 1) {
+      const requestedItem = items[index];
+      const productSnapshot = productSnapshots[index];
 
       if (!productSnapshot.exists()) {
-        throw new Error("Product not found.");
+        throw new Error("One of the products no longer exists.");
       }
 
       const product = productSnapshot.data();
@@ -65,58 +110,100 @@ export async function completeSaleTransaction({
 
       if (pricePerKg <= 0) {
         throw new Error(
-          "Product has no valid selling price."
+          `${productName} has no valid selling price.`,
         );
       }
 
-      if (weightKg > currentWeight) {
+      if (requestedItem.weightKg > currentWeight) {
         throw new Error(
-          `Only ${currentWeight.toFixed(
-            2
-          )} kg is available.`
+          `${productName}: only ${currentWeight.toFixed(
+            2,
+          )} kg is available.`,
         );
       }
 
       const remainingWeightKg =
         Math.round(
-          (currentWeight - weightKg) * 1000
+          (currentWeight - requestedItem.weightKg) * 1000,
         ) / 1000;
 
-      const totalAmount =
+      const lineTotal =
         Math.round(
-          weightKg * pricePerKg * 100
+          requestedItem.weightKg * pricePerKg * 100,
         ) / 100;
 
+      completedItems.push({
+        productId: requestedItem.productId,
+        productName,
+        weightKg: requestedItem.weightKg,
+        pricePerKg,
+        lineTotal,
+        stockBeforeKg: currentWeight,
+        remainingWeightKg,
+      });
+    }
+
+    const totalAmount =
+      Math.round(
+        completedItems.reduce(
+          (sum, item) => sum + item.lineTotal,
+          0,
+        ) * 100,
+      ) / 100;
+
+    /*
+     * Everything is valid.
+     * Now perform the writes.
+     */
+
+    completedItems.forEach((item) => {
+      const productRef = doc(
+        collection(db, "products"),
+        item.productId,
+      );
+
       transaction.update(productRef, {
-        weightKg: remainingWeightKg,
+        weightKg: item.remainingWeightKg,
         updatedAt: serverTimestamp(),
       });
 
-      transaction.set(saleRef, {
-        productId,
-        productName,
+      // One historical item record per product sold.
+      const saleItemRef = doc(
+        collection(saleRef, "items"),
+      );
 
-        weightKg,
+      transaction.set(saleItemRef, {
+        productId: item.productId,
+        productName: item.productName,
 
-        // Snapshot the price at the moment of sale.
-        // Future price changes must not alter history.
-        pricePerKg,
+        weightKg: item.weightKg,
 
-        totalAmount,
+        // Historical price snapshot.
+        pricePerKg: item.pricePerKg,
 
-        stockBeforeKg: currentWeight,
-        stockAfterKg: remainingWeightKg,
+        lineTotal: item.lineTotal,
 
-        soldAt: serverTimestamp(),
+        stockBeforeKg: item.stockBeforeKg,
+        stockAfterKg: item.remainingWeightKg,
       });
+    });
 
-      return {
-        saleId: saleRef.id,
-        remainingWeightKg,
-        totalAmount,
-      };
-    }
-  );
+    // One sale document for the whole customer transaction.
+    transaction.set(saleRef, {
+      totalAmount,
+      itemCount: completedItems.length,
 
-  return result;
+      // Helps us distinguish the new cart-based structure
+      // from existing single-product sales.
+      schemaVersion: 2,
+
+      soldAt: serverTimestamp(),
+    });
+
+    return {
+      saleId: saleRef.id,
+      totalAmount,
+      items: completedItems,
+    };
+  });
 }

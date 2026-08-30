@@ -19,6 +19,10 @@ import {
   savePrinterSettings,
 } from "@/src/db/repositories/printer-settings-repository";
 
+import { printTestReceipt } from "@/src/services/printer";
+
+
+
 export default function SettingsScreen() {
   const [reorderInput, setReorderInput] = useState("20");
   const [markupInput, setMarkupInput] = useState("25");
@@ -35,6 +39,8 @@ export default function SettingsScreen() {
 
   const [printerSaving, setPrinterSaving] = useState(false);
   const [printerMessage, setPrinterMessage] = useState("");
+
+  const [testingPrinter, setTestingPrinter] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -216,6 +222,27 @@ export default function SettingsScreen() {
       );
     } finally {
       setPrinterSaving(false);
+    }
+  };
+
+  const handleTestPrint = async () => {
+    try {
+      setTestingPrinter(true);
+      setPrinterMessage("");
+
+      await printTestReceipt();
+
+      setPrinterMessage("Test receipt printed.");
+    } catch (error) {
+      console.error("Printer test failed:", error);
+
+      setPrinterMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not print test receipt.",
+      );
+    } finally {
+      setTestingPrinter(false);
     }
   };
 
@@ -455,6 +482,19 @@ export default function SettingsScreen() {
             {printerMessage}
           </Text>
         )}
+
+        <Pressable
+          style={[
+            styles.saveButton,
+            testingPrinter && styles.saveButtonDisabled,
+          ]}
+          disabled={testingPrinter}
+          onPress={handleTestPrint}
+        >
+          <Text style={styles.saveButtonText}>
+            {testingPrinter ? "PRINTING..." : "TEST PRINT"}
+          </Text>
+        </Pressable>
       </View>
 
     </ScrollView>

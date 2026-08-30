@@ -6,7 +6,8 @@ import {
 } from "react-native";
 
 import NewProductForm from "@/components/NewProductForm";
-import { createProduct } from "@/src/services/products";
+
+import { createLocalProduct } from "@/src/services/local-products";
 
 export default function NewProductScreen() {
   const router = useRouter();
@@ -20,7 +21,7 @@ export default function NewProductScreen() {
     fullStockKg: number;
     pricePerKg: number;
   }) => {
-    await createProduct({
+    await createLocalProduct({
       name,
       fullStockKg,
       pricePerKg,

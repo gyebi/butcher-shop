@@ -1,10 +1,4 @@
-import {
-  collection,
-  doc,
-  getFirestore,
-  runTransaction,
-  serverTimestamp,
-} from "@react-native-firebase/firestore";
+import { getDatabase } from "@/src/db/database";
 
 export type AddStockInput = {
   productId: string;
@@ -20,6 +14,20 @@ export type AddStockResult = {
   sellingPricePerKg: number;
   fullStockKg: number;
 };
+
+type StockBatchProductRow = {
+  id: string;
+  name: string;
+  weight_kg: number;
+  full_stock_kg: number;
+  active: number;
+};
+
+function createLocalId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+}
 
 export async function addStockTransaction({
   productId,
@@ -39,138 +47,166 @@ export async function addStockTransaction({
     !Number.isFinite(totalPurchaseCost) ||
     totalPurchaseCost <= 0
   ) {
-    throw new Error(
-      "Invalid purchase cost."
-    );
+    throw new Error("Invalid purchase cost.");
   }
 
   if (
     !Number.isFinite(costPerKg) ||
     costPerKg <= 0
   ) {
-    throw new Error(
-      "Invalid cost per kg."
-    );
+    throw new Error("Invalid cost per kg.");
   }
 
   if (
     !Number.isFinite(sellingPricePerKg) ||
     sellingPricePerKg <= 0
   ) {
-    throw new Error(
-      "Invalid selling price."
-    );
+    throw new Error("Invalid selling price.");
   }
 
-  const db = getFirestore();
+  const db = await getDatabase();
+  const now = new Date().toISOString();
+  const stockBatchId = createLocalId("stock_batch");
+  const movementId = createLocalId("movement");
 
-  const productRef = doc(
-    collection(db, "products"),
-    productId
-  );
+  let result: AddStockResult | null = null;
 
-  // Generate the batch ID before entering
-  // the transaction.
-  const batchRef = doc(
-    collection(db, "stockBatches")
-  );
-
-  const result = await runTransaction(
-    db,
-    async (transaction) => {
-      const productSnapshot =
-        await transaction.get(productRef);
-
-      if (!productSnapshot.exists()) {
-        throw new Error(
-          "Product not found."
+  await db.withExclusiveTransactionAsync(async (txn) => {
+      const product =
+        await txn.getFirstAsync<StockBatchProductRow>(
+          `
+          SELECT
+            id,
+            name,
+            weight_kg,
+            full_stock_kg,
+            active
+          FROM products
+          WHERE id = ?
+          LIMIT 1;
+          `,
+          [productId],
         );
+
+      if (!product) {
+        throw new Error("Product not found.");
       }
 
-      const product =
-        productSnapshot.data();
+      if (product.active !== 1) {
+        throw new Error("Product is inactive.");
+      }
 
-      const currentWeightKg =
-        typeof product.weightKg === "number"
-          ? product.weightKg
-          : 0;
+      const currentWeightKg = Number.isFinite(
+        product.weight_kg,
+      )
+        ? product.weight_kg
+        : 0;
 
-      const currentFullStockKg =
-        typeof product.fullStockKg === "number"
-          ? product.fullStockKg
-          : 0;
-
-      const productName =
-        typeof product.name === "string"
-          ? product.name
-          : "Unknown Product";
+      const currentFullStockKg = Number.isFinite(
+        product.full_stock_kg,
+      )
+        ? product.full_stock_kg
+        : 0;
 
       const newWeightKg =
         Math.round(
-          (currentWeightKg +
-            addedWeightKg) *
-            1000
+          (currentWeightKg + addedWeightKg) * 1000,
         ) / 1000;
 
-      const roundedSellingPrice =
-        Math.round(
-          sellingPricePerKg * 100
-        ) / 100;
-
-      const newFullStockKg =
-        Math.max(
-          currentFullStockKg,
-          newWeightKg
-        );
-
-      // Update current dashboard state.
-      transaction.update(productRef, {
-        weightKg: newWeightKg,
-        fullStockKg: newFullStockKg,
-        pricePerKg:
-          roundedSellingPrice,
-        updatedAt:
-          serverTimestamp(),
-      });
-
-      // Preserve this specific purchase forever.
-      transaction.set(batchRef, {
-        productId,
-        productName,
-
-        weightReceivedKg:
-          addedWeightKg,
-
-        remainingWeightKg:
-          addedWeightKg,
-
-        totalPurchaseCost,
-
-        costPerKg,
-
-        sellingPricePerKg:
-          roundedSellingPrice,
-
-        stockBeforeKg:
-          currentWeightKg,
-
-        stockAfterKg:
-          newWeightKg,
-
-        receivedAt:
-          serverTimestamp(),
-      });
-
-      return {
-        batchId: batchRef.id,
+      const newFullStockKg = Math.max(
+        currentFullStockKg,
         newWeightKg,
-        sellingPricePerKg:
-          roundedSellingPrice,
-        fullStockKg:
+      );
+
+      const roundedSellingPrice =
+        Math.round(sellingPricePerKg * 100) / 100;
+
+      await txn.runAsync(
+        `
+        UPDATE products
+        SET
+          weight_kg = ?,
+          full_stock_kg = ?,
+          selling_price_pesewas = ?,
+          updated_at = ?,
+          sync_status = 'PENDING'
+        WHERE id = ?;
+        `,
+        [
+          newWeightKg,
           newFullStockKg,
+          Math.round(roundedSellingPrice * 100),
+          now,
+          productId,
+        ],
+      );
+
+      await txn.runAsync(
+        `
+        INSERT INTO stock_batches (
+          id,
+          product_id,
+          product_name,
+          weight_received_kg,
+          remaining_weight_kg,
+          total_purchase_cost_pesewas,
+          cost_per_kg_pesewas,
+          selling_price_per_kg_pesewas,
+          stock_before_kg,
+          stock_after_kg,
+          received_at,
+          sync_status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING');
+        `,
+        [
+          stockBatchId,
+          productId,
+          product.name,
+          addedWeightKg,
+          addedWeightKg,
+          Math.round(totalPurchaseCost * 100),
+          Math.round(costPerKg * 100),
+          Math.round(roundedSellingPrice * 100),
+          currentWeightKg,
+          newWeightKg,
+          now,
+        ],
+      );
+
+      await txn.runAsync(
+        `
+        INSERT INTO inventory_movements (
+          id,
+          product_id,
+          movement_type,
+          weight_kg,
+          reference_id,
+          created_at,
+          sync_status
+        )
+        VALUES (?, ?, 'STOCK_IN', ?, ?, ?, 'PENDING');
+        `,
+        [
+          movementId,
+          productId,
+          addedWeightKg,
+          stockBatchId,
+          now,
+        ],
+      );
+
+      result = {
+        batchId: stockBatchId,
+        newWeightKg,
+        sellingPricePerKg: roundedSellingPrice,
+        fullStockKg: newFullStockKg,
       };
-    }
-  );
+    });
+
+  if (!result) {
+    throw new Error("Failed to add stock.");
+  }
 
   return result;
 }

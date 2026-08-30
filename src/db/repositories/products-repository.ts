@@ -194,3 +194,76 @@ export async function deleteLocalProductById(
     [id]
   );
 }
+
+export async function updateLocalProductImage(
+  productId: string,
+  localImageUri: string
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `
+    UPDATE products
+    SET
+      local_image_uri = ?,
+      updated_at = ?,
+      sync_status = 'PENDING'
+    WHERE id = ?;
+    `,
+    [
+      localImageUri,
+      new Date().toISOString(),
+      productId,
+    ]
+  );
+}
+
+export async function queueProductImageSync(
+  productId: string,
+  localImageUri: string
+): Promise<void> {
+  const db = await getDatabase();
+  const now = new Date().toISOString();
+
+  const syncId =
+    `sync_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 10)}`;
+
+  await db.runAsync(
+    `
+    INSERT INTO sync_queue (
+      id,
+      entity_type,
+      entity_id,
+      operation,
+      payload,
+      status,
+      attempt_count,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ?,
+      'PRODUCT_IMAGE',
+      ?,
+      'UPDATE',
+      ?,
+      'PENDING',
+      0,
+      ?,
+      ?
+    );
+    `,
+    [
+      syncId,
+      productId,
+      JSON.stringify({
+        productId,
+        localImageUri,
+      }),
+      now,
+      now,
+    ]
+  );
+}
