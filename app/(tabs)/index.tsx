@@ -1,9 +1,8 @@
 import { syncPendingChanges } from "@/src/services/sync";
 
+import NetInfo from "@react-native-community/netinfo";
 import * as ImagePicker from "expo-image-picker";
 import { useCallback, useEffect, useState } from "react";
-
-import { saveProductImageLocally } from "@/src/services/local-product-images";
 
 import {
   loadBusinessSettings,
@@ -12,11 +11,14 @@ import {
 
 import {
   loadProducts,
-  updateProductImage,
   loadLocalProducts,
+  updateProductImage,
 } from "@/src/services/products";
 
-import { updateLocalProductImage } from "@/src/db/repositories/products-repository";
+import {
+  deleteProductImage,
+  uploadProductImage,
+} from "@/src/services/product-images";
 
 
 import { addLocalStockTransaction } from "@/src/services/local-stock";
@@ -162,30 +164,96 @@ export default function HomeScreen() {
   const uploadSelectedImage = async (
     product: Product,
     localUri: string,
-    fileName?: string | null,
-    mimeType?: string | null
   ) => {
-    const savedLocalUri =
-      await saveProductImageLocally(
-        product.id,
-        localUri,
-        fileName,
-        mimeType
+      console.log(
+    "UPLOAD SELECTED IMAGE CALLED:",
+    product.id,
+    product.name,
+    localUri
+  );
+    const networkState = await NetInfo.fetch();
+    const isOnline =
+      networkState.isConnected === true &&
+      networkState.isInternetReachable !== false;
+
+    if (!isOnline) {
+      Alert.alert(
+        "Internet required",
+        "Product photos can only be changed while online."
       );
-    await updateLocalProductImage(
+      return;
+    }
+
+    const {
+      imagePath,
+      imageUrl,
+    } = await uploadProductImage(
       product.id,
-      savedLocalUri
+      localUri
     );
+
+    await updateProductImage(
+      product.id,
+      imagePath
+    );
+
     setProducts((currentProducts) =>
       currentProducts.map((item) =>
         item.id === product.id
           ? {
             ...item,
-            imageUrl: savedLocalUri,
+            imagePath,
+            imageUrl,
           }
           : item
       )
     );
+
+    void syncPendingChanges();
+  };
+
+  const removeSelectedImage = async (
+    product: Product
+  ) => {
+    try {
+      const networkState = await NetInfo.fetch();
+      const isOnline =
+        networkState.isConnected === true &&
+        networkState.isInternetReachable !== false;
+
+      if (!isOnline) {
+        Alert.alert(
+          "Internet required",
+          "Product photos can only be changed while online."
+        );
+        return;
+      }
+
+      await deleteProductImage(product.id);
+      await updateProductImage(
+        product.id,
+        null
+      );
+
+      setProducts((currentProducts) =>
+        currentProducts.map((item) =>
+          item.id === product.id
+            ? {
+              ...item,
+              imagePath: undefined,
+              imageUrl: undefined,
+            }
+            : item
+        )
+      );
+
+      void syncPendingChanges();
+    } catch (error) {
+      console.error(
+        "Failed to remove product photo:",
+        error
+      );
+    }
   };
 
   const chooseImageFromGallery = async (
@@ -198,6 +266,7 @@ export default function HomeScreen() {
           allowsEditing: true,
           aspect: [4, 3],
           quality: 0.8,
+          base64: true,
         });
 
       if (result.canceled) {
@@ -212,15 +281,17 @@ export default function HomeScreen() {
 
       await uploadSelectedImage(
         product,
-        asset.uri,
-        asset.fileName,
-        asset.mimeType
+        asset.uri
       );
 
     } catch (error) {
       console.error(
         "Failed to choose image:",
         error
+      );
+      console.log(
+        "IMAGE PICK/SAVE ERROR STRING:",
+        String(error)
       );
     }
   };
@@ -243,9 +314,10 @@ export default function HomeScreen() {
 
       const result =
         await ImagePicker.launchCameraAsync({
-          allowsEditing: true,
-          aspect: [4, 3],
-          quality: 0.8,
+          mediaTypes: "images",
+          allowsEditing: false,
+          quality: 1,
+          cameraType: ImagePicker.CameraType.back,
         });
 
       if (result.canceled) {
@@ -273,26 +345,73 @@ export default function HomeScreen() {
   const handleChooseImage = (
     product: Product
   ) => {
-    Alert.alert(
-      "Product Image",
-      `Update image for ${product.name}`,
-      [
-        {
-          text: "Choose from Gallery",
-          onPress: () =>
-            chooseImageFromGallery(product),
+    const buttons: {
+      text: string;
+      onPress?: () => void;
+      style?: "cancel" | "destructive";
+    }[] = [
+      {
+        text: "Choose from Gallery",
+        onPress: () =>
+          chooseImageFromGallery(product),
+      },
+      {
+        text: "Take Photo",
+        onPress: () =>
+          takeProductPhoto(product),
+      },
+    ];
+
+    if (product.imageUrl) {
+      buttons.push({
+        text: "Remove Photo",
+        style: "destructive",
+        onPress: () => {
+          Alert.alert(
+            "Remove photo?",
+            `This will remove the photo for ${product.name}.`,
+            [
+              {
+                text: "Cancel",
+                style: "cancel",
+              },
+              {
+                text: "Remove",
+                style: "destructive",
+                onPress: () =>
+                  removeSelectedImage(product),
+              },
+            ]
+          );
         },
-        {
-          text: "Take Photo",
-          onPress: () =>
-            takeProductPhoto(product),
-        },
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
-      ]
-    );
+      });
+    }
+
+    buttons.push({
+      text: "Cancel",
+      style: "cancel",
+    });
+
+    void (async () => {
+      const networkState = await NetInfo.fetch();
+      const isOnline =
+        networkState.isConnected === true &&
+        networkState.isInternetReachable !== false;
+
+      if (!isOnline) {
+        Alert.alert(
+          "Internet required",
+          "Product photos can only be changed while online."
+        );
+        return;
+      }
+
+      Alert.alert(
+        "Product Image",
+        `Update image for ${product.name}`,
+        buttons
+      );
+    })();
   };
 
   const totalWeight = products.reduce(

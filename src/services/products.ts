@@ -8,7 +8,13 @@ import {
   setDoc,
 } from "@react-native-firebase/firestore";
 
-import { getLocalProducts, saveLocalProduct, getLocalProductById } from "@/src/db/repositories/products-repository";
+import {
+  getLocalProducts,
+  getLocalProductById,
+  saveLocalProduct,
+} from "@/src/db/repositories/products-repository";
+
+import { getProductImageUrl } from "@/src/services/product-images";
 
 
 export type ProductRecord = {
@@ -99,7 +105,7 @@ export async function loadProducts(): Promise<ProductRecord[]> {
       collection(db, COLLECTION_NAME)
     );
 
-    const products = snapshot.docs.map((document) => {
+    const firebaseProducts = snapshot.docs.map((document) => {
       const data = document.data();
 
       return {
@@ -132,10 +138,26 @@ export async function loadProducts(): Promise<ProductRecord[]> {
       };
     });
 
-    
-    await cacheProductsLocally(products);
+    await cacheProductsLocally(firebaseProducts);
 
-    return products;
+    return await Promise.all(
+      firebaseProducts.map(async (product) => {
+        if (product.imagePath) {
+          const remoteImageUrl = await getProductImageUrl(
+            product.imagePath
+          );
+
+          if (remoteImageUrl) {
+            return {
+              ...product,
+              imageUrl: remoteImageUrl,
+            };
+          }
+        }
+
+        return product;
+      })
+    );
 
   } catch (error) {
     console.warn(
@@ -152,18 +174,21 @@ export async function loadProducts(): Promise<ProductRecord[]> {
       fullStockKg: product.fullStockKg,
       pricePerKg: product.sellingPricePesewas / 100,
       imagePath: product.imagePath ?? undefined,
-
-      // We deliberately do not generate a Firebase
-      // download URL here while offline.
-      imageUrl: product.localImageUri ?? undefined,
+      imageUrl: undefined,
     }));
   }
 }
 
 export async function updateProductImage(
   productId: string,
-  imagePath: string
+  imagePath: string | null
 ) {
+  console.log(
+    "FIRESTORE IMAGE UPDATE START:",
+    productId,
+    imagePath
+  );
+
   const db = getFirestore();
 
   const productRef = doc(
@@ -180,6 +205,12 @@ export async function updateProductImage(
     {
       merge: true,
     }
+  );
+
+  console.log(
+    "FIRESTORE IMAGE UPDATE COMPLETE:",
+    productId,
+    imagePath
   );
 }
 
@@ -207,6 +238,7 @@ export async function saveProduct(
   );
 }
 
+
 export async function seedProducts(
   products: ProductRecord[]
 ) {
@@ -214,6 +246,8 @@ export async function seedProducts(
     await saveProduct(product);
   }
 }
+
+
 
 /*
 export async function cacheProductsLocally(
@@ -289,13 +323,9 @@ export async function cacheProductsLocally(
       unit:
         existingLocalProduct?.unit ?? "kg",
 
-      imagePath:
-        product.imagePath ??
-        existingLocalProduct?.imagePath ??
-        null,
+      imagePath: product.imagePath ?? null,
 
-      localImageUri:
-        existingLocalProduct?.localImageUri ?? null,
+      localImageUri: null,
 
       active: true,
 
@@ -331,7 +361,6 @@ export async function loadLocalProducts(): Promise<ProductRecord[]> {
     fullStockKg: product.fullStockKg,
     pricePerKg: product.sellingPricePesewas / 100,
     imagePath: product.imagePath ?? undefined,
-    imageUrl: product.localImageUri ?? undefined,
+    imageUrl: undefined,
   }));
 }
-

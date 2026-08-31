@@ -11,7 +11,7 @@ import {
 
 import { getDatabase } from "@/src/db/database";
 
-import { uploadProductImage } from "@/src/services/product-images";
+import NetInfo from "@react-native-community/netinfo";
 
 type SyncQueueRow = {
   id: string;
@@ -25,7 +25,7 @@ type PendingSalePayload = {
   totalAmount: number;
   soldAt: string;
 
-  items: Array<{
+  items: {
     productId: string;
     productName: string;
     weightKg: number;
@@ -33,7 +33,7 @@ type PendingSalePayload = {
     lineTotal: number;
     stockBeforeKg: number;
     remainingWeightKg: number;
-  }>;
+  }[];
 };
 
 
@@ -62,11 +62,6 @@ type PendingProductPayload = {
   fullStockKg: number;
   pricePerKg: number;
   createdAt: string;
-};
-
-type PendingProductImagePayload = {
-  productId: string;
-  localImageUri: string;
 };
 
 
@@ -937,156 +932,21 @@ async function syncOneProduct(
 }
 
 
-export async function syncPendingProductImages(): Promise<void> {
-  const localDb = await getDatabase();
+export async function syncPendingChanges(): Promise<void> {
+  const networkState = await NetInfo.fetch();
 
-  const pendingJobs =
-    await localDb.getAllAsync<SyncQueueRow>(
-      `
-      SELECT
-        id,
-        entity_id,
-        payload,
-        attempt_count
-      FROM sync_queue
-      WHERE entity_type = 'PRODUCT_IMAGE'
-        AND operation = 'UPDATE'
-        AND status IN ('PENDING', 'FAILED')
-      ORDER BY created_at ASC;
-      `
+  const isOnline =
+    networkState.isConnected === true &&
+    networkState.isInternetReachable !== false;
+
+  if (!isOnline) {
+    console.log(
+      "Offline: pending changes will remain queued."
     );
-
-  for (const job of pendingJobs) {
-    let payload: PendingProductImagePayload;
-
-    try {
-      payload = JSON.parse(
-        job.payload
-      ) as PendingProductImagePayload;
-    } catch {
-      await markSyncFailed(
-        job.id,
-        job.attempt_count,
-        "Invalid product image sync payload."
-      );
-      continue;
-    }
-
-    const now = new Date().toISOString();
-
-    try {
-      await localDb.runAsync(
-        `
-        UPDATE sync_queue
-        SET
-          status = 'SYNCING',
-          attempt_count = attempt_count + 1,
-          last_attempt_at = ?,
-          last_error = NULL,
-          updated_at = ?
-        WHERE id = ?;
-        `,
-        [now, now, job.id]
-      );
-
-      const {
-        imagePath,
-      } = await uploadProductImage(
-        payload.productId,
-        payload.localImageUri
-      );
-
-      const firestore = getFirestore();
-
-      const productRef = doc(
-        collection(firestore, "products"),
-        payload.productId
-      );
-
-      await setDoc(
-        productRef,
-        {
-          imagePath,
-          updatedAt: serverTimestamp(),
-        },
-        {
-          merge: true,
-        }
-      );
-
-      await localDb.withExclusiveTransactionAsync(
-        async (txn) => {
-          const syncedAt =
-            new Date().toISOString();
-
-          await txn.runAsync(
-            `
-            UPDATE sync_queue
-            SET
-              status = 'SYNCED',
-              last_error = NULL,
-              updated_at = ?
-            WHERE id = ?;
-            `,
-            [syncedAt, job.id]
-          );
-
-          await txn.runAsync(
-            `
-            UPDATE products
-            SET
-              image_path = ?,
-              sync_status = 'SYNCED',
-              updated_at = ?
-            WHERE id = ?;
-            `,
-            [
-              imagePath,
-              syncedAt,
-              payload.productId,
-            ]
-          );
-        }
-      );
-
-      console.log(
-        "PRODUCT IMAGE SYNCED:",
-        payload.productId
-      );
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : String(error);
-
-      await markSyncFailed(
-        job.id,
-        job.attempt_count + 1,
-        message
-      );
-
-      console.log(
-        "PRODUCT IMAGE SYNC FAILED:",
-        payload.productId,
-        message
-      );
-    }
+    return;
   }
-}
 
-
-  export async function syncPendingChanges(): Promise<void> {
-  // Products must sync first because a newly
-  // created offline product may then have
-  // stock batches or sales referencing it.
-  //sync images 
-  
   await syncPendingProducts();
-
   await syncPendingStockBatches();
-
   await syncPendingSales();
-
-  await syncPendingProductImages();
-
 }
