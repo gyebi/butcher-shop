@@ -11,8 +11,6 @@ import {
 
 import { getDatabase } from "@/src/db/database";
 
-import NetInfo from "@react-native-community/netinfo";
-
 type SyncQueueRow = {
   id: string;
   entity_id: string;
@@ -933,19 +931,6 @@ async function syncOneProduct(
 
 
 export async function syncPendingChanges(): Promise<void> {
-  const networkState = await NetInfo.fetch();
-
-  const isOnline =
-    networkState.isConnected === true &&
-    networkState.isInternetReachable !== false;
-
-  if (!isOnline) {
-    console.log(
-      "Offline: pending changes will remain queued."
-    );
-    return;
-  }
-
   await syncPendingProducts();
   await syncPendingStockBatches();
   await syncPendingSales();

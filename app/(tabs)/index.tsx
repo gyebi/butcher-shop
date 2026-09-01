@@ -1,6 +1,4 @@
-import { syncPendingChanges } from "@/src/services/sync";
-
-import NetInfo from "@react-native-community/netinfo";
+import { useFocusEffect } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import { useCallback, useEffect, useState } from "react";
 
@@ -8,6 +6,8 @@ import {
   loadBusinessSettings,
   saveBusinessSettings,
 } from "@/src/services/settings";
+
+import { syncPendingChanges } from "@/src/services/sync";
 
 import {
   loadProducts,
@@ -39,7 +39,6 @@ import AddStockModal from "../../components/AddStockModal";
 import SellModal from "../../components/SellModal";
 import SummaryCard from "../../components/SummaryCard";
 
-import { useFocusEffect } from "@react-navigation/native";
 import { completeLocalSaleTransaction } from "@/src/services/local-sales";
 import { printSaleReceipt } from "@/src/services/printer";
 
@@ -72,10 +71,6 @@ export default function HomeScreen() {
   const [cart, setCart] = useState<CartItem[]>([]);
 
 
-
-  useEffect(() => {
-    void syncPendingChanges();
-  }, []);
 
   useEffect(() => {
     async function loadSettings() {
@@ -113,12 +108,6 @@ export default function HomeScreen() {
 
     initialiseProducts();
   }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      void syncPendingChanges();
-    }, [])
-  );
 
   const refreshProducts = useCallback(async () => {
     try {
@@ -160,6 +149,16 @@ export default function HomeScreen() {
     void refreshProducts();
   }, [refreshProducts]);
 
+  useEffect(() => {
+    void syncPendingChanges();
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void syncPendingChanges();
+    }, [])
+  );
+
 
   const uploadSelectedImage = async (
     product: Product,
@@ -171,19 +170,7 @@ export default function HomeScreen() {
     product.name,
     localUri
   );
-    const networkState = await NetInfo.fetch();
-    const isOnline =
-      networkState.isConnected === true &&
-      networkState.isInternetReachable !== false;
-
-    if (!isOnline) {
-      Alert.alert(
-        "Internet required",
-        "Product photos can only be changed while online."
-      );
-      return;
-    }
-
+    
     const {
       imagePath,
       imageUrl,
@@ -208,26 +195,13 @@ export default function HomeScreen() {
           : item
       )
     );
-
-    void syncPendingChanges();
   };
 
   const removeSelectedImage = async (
     product: Product
   ) => {
     try {
-      const networkState = await NetInfo.fetch();
-      const isOnline =
-        networkState.isConnected === true &&
-        networkState.isInternetReachable !== false;
-
-      if (!isOnline) {
-        Alert.alert(
-          "Internet required",
-          "Product photos can only be changed while online."
-        );
-        return;
-      }
+      
 
       await deleteProductImage(product.id);
       await updateProductImage(
@@ -246,8 +220,6 @@ export default function HomeScreen() {
             : item
         )
       );
-
-      void syncPendingChanges();
     } catch (error) {
       console.error(
         "Failed to remove product photo:",
@@ -393,18 +365,7 @@ export default function HomeScreen() {
     });
 
     void (async () => {
-      const networkState = await NetInfo.fetch();
-      const isOnline =
-        networkState.isConnected === true &&
-        networkState.isInternetReachable !== false;
-
-      if (!isOnline) {
-        Alert.alert(
-          "Internet required",
-          "Product photos can only be changed while online."
-        );
-        return;
-      }
+      
 
       Alert.alert(
         "Product Image",
