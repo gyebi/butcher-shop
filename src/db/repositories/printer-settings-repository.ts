@@ -89,7 +89,6 @@ export async function savePrinterSettings(
       updated_at
     )
     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
-
     ON CONFLICT(id) DO UPDATE SET
       enabled = excluded.enabled,
       printer_name = excluded.printer_name,
@@ -100,15 +99,13 @@ export async function savePrinterSettings(
       charset = excluded.charset,
       updated_at = excluded.updated_at
     `,
-    [
-      settings.enabled ? 1 : 0,
-      settings.printerName,
-      settings.printerAddress,
-      settings.connectionType,
-      settings.paperWidthMm,
-      settings.printWidthMm,
-      settings.charset,
-      settings.updatedAt,
-    ]
+    settings.enabled ? 1 : 0,
+    settings.printerName,
+    settings.printerAddress,
+    settings.connectionType,
+    settings.paperWidthMm,
+    settings.printWidthMm,
+    settings.charset,
+    settings.updatedAt
   );
 }

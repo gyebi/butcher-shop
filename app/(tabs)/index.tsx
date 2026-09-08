@@ -7,11 +7,8 @@ import {
   saveBusinessSettings,
 } from "@/src/services/settings";
 
-import { syncPendingChanges } from "@/src/services/sync";
-
 import {
   loadProducts,
-  loadLocalProducts,
   updateProductImage,
 } from "@/src/services/products";
 
@@ -41,7 +38,7 @@ import SummaryCard from "../../components/SummaryCard";
 
 import { completeLocalSaleTransaction } from "@/src/services/local-sales";
 import { printSaleReceipt } from "@/src/services/printer";
-
+import { getPrinterSettings } from "@/src/db/repositories/printer-settings-repository";
 
 
 export default function HomeScreen() {
@@ -94,68 +91,35 @@ export default function HomeScreen() {
     loadSettings();
   }, []);
 
-  useEffect(() => {
-    async function initialiseProducts() {
-      try {
-        const savedProducts = await loadProducts();
-        setProducts(savedProducts);
-      } catch (error) {
-        console.error("Failed to load products:", error);
-      } finally {
-        setProductsLoading(false);
-      }
-    }
-
-    initialiseProducts();
-  }, []);
-
-  const refreshProducts = useCallback(async () => {
-    try {
-      setProductsLoading(true)     // 1. Load SQLite immediately
-      const localProducts = await loadLocalProducts();
-
-      if (localProducts.length > 0) {
-        setProducts(localProducts);
-      }
-
-      //local data is ready , so stop the loading state now 
-
-      setProductsLoading(false);
-
-      //refresh from Firebase in the background 
-
-      void loadProducts()
-        .then((freshProducts) => {
-          setProducts(freshProducts);
-        })
-        .catch((firebaseError) => {
-          console.log(
-            "Firebase unavailable. Continuing with local products.",
-            firebaseError,
-          );
-        });
-
-    } catch (error) {
-      console.error(
-        "Failed to load local products:",
-        error,
-      );
-
-      setProductsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshProducts();
-  }, [refreshProducts]);
-
-  useEffect(() => {
-    void syncPendingChanges();
-  }, []);
-
   useFocusEffect(
     useCallback(() => {
-      void syncPendingChanges();
+      let isActive = true;
+
+      async function loadLocalProductsOnly() {
+        try {
+          setProductsLoading(true);
+
+          const savedProducts = await loadProducts();
+
+          if (!isActive) {
+            return;
+          }
+
+          setProducts(savedProducts);
+        } catch (error) {
+          console.error("Failed to load products:", error);
+        } finally {
+          if (isActive) {
+            setProductsLoading(false);
+          }
+        }
+      }
+
+      void loadLocalProductsOnly();
+
+      return () => {
+        isActive = false;
+      };
     }, [])
   );
 
@@ -164,13 +128,13 @@ export default function HomeScreen() {
     product: Product,
     localUri: string,
   ) => {
-      console.log(
-    "UPLOAD SELECTED IMAGE CALLED:",
-    product.id,
-    product.name,
-    localUri
-  );
-    
+    console.log(
+      "UPLOAD SELECTED IMAGE CALLED:",
+      product.id,
+      product.name,
+      localUri
+    );
+
     const {
       imagePath,
       imageUrl,
@@ -181,7 +145,8 @@ export default function HomeScreen() {
 
     await updateProductImage(
       product.id,
-      imagePath
+      imagePath,
+      imageUrl
     );
 
     setProducts((currentProducts) =>
@@ -201,11 +166,12 @@ export default function HomeScreen() {
     product: Product
   ) => {
     try {
-      
+
 
       await deleteProductImage(product.id);
       await updateProductImage(
         product.id,
+        null,
         null
       );
 
@@ -322,17 +288,17 @@ export default function HomeScreen() {
       onPress?: () => void;
       style?: "cancel" | "destructive";
     }[] = [
-      {
-        text: "Choose from Gallery",
-        onPress: () =>
-          chooseImageFromGallery(product),
-      },
-      {
-        text: "Take Photo",
-        onPress: () =>
-          takeProductPhoto(product),
-      },
-    ];
+        {
+          text: "Choose from Gallery",
+          onPress: () =>
+            chooseImageFromGallery(product),
+        },
+        {
+          text: "Take Photo",
+          onPress: () =>
+            takeProductPhoto(product),
+        },
+      ];
 
     if (product.imageUrl) {
       buttons.push({
@@ -365,7 +331,7 @@ export default function HomeScreen() {
     });
 
     void (async () => {
-      
+
 
       Alert.alert(
         "Product Image",
@@ -516,12 +482,22 @@ export default function HomeScreen() {
     }
 
     try {
+
+      console.log("SALE FLOW 1: START");
+
+      console.log("SALE FLOW 2: GETTING PRINTER SETTINGS");
+      const printerSettings = await getPrinterSettings();
+      console.log("SALE FLOW 3: PRINTER SETTINGS OK");
+
+      console.log("SALE FLOW 4: STARTING LOCAL SALE");
+
       const result = await completeLocalSaleTransaction({
         items: cart.map((item) => ({
           productId: item.productId,
           weightKg: item.weightKg,
         })),
       });
+      console.log("SALE FLOW 5: LOCAL SALE COMPLETE");
 
       setProducts((currentProducts) =>
         currentProducts.map((product) => {
@@ -549,16 +525,19 @@ export default function HomeScreen() {
         result.totalAmount,
       );
       try {
-        const printResult = await printSaleReceipt({
-          saleId: result.saleId,
-          items: result.items.map((item) => ({
-            productName: item.productName,
-            weightKg: item.weightKg,
-            pricePerKg: item.pricePerKg,
-            lineTotal: item.lineTotal,
-          })),
-          totalAmount: result.totalAmount,
-        });
+        const printResult = await printSaleReceipt(
+          {
+            saleId: result.saleId,
+            items: result.items.map((item) => ({
+              productName: item.productName,
+              weightKg: item.weightKg,
+              pricePerKg: item.pricePerKg,
+              lineTotal: item.lineTotal,
+            })),
+            totalAmount: result.totalAmount,
+          },
+          printerSettings,
+        );
 
         console.log(
           "RECEIPT PRINT:",

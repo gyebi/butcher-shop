@@ -98,90 +98,87 @@ export async function createProduct(
 }
 
 export async function loadProducts(): Promise<ProductRecord[]> {
-  try {
-    const db = getFirestore();
+  const localProducts = await getLocalProducts();
 
-    const snapshot = await getDocs(
-      collection(db, COLLECTION_NAME)
-    );
+  return localProducts.map((product) => ({
+    id: product.id,
+    name: product.name,
+    weightKg: product.weightKg,
+    fullStockKg: product.fullStockKg,
+    pricePerKg: product.sellingPricePesewas / 100,
+    imagePath: product.imagePath ?? undefined,
+    imageUrl: product.localImageUri ?? undefined,
+  }));
+}
 
-    const firebaseProducts = snapshot.docs.map((document) => {
-      const data = document.data();
+export async function refreshProductsFromFirebase(): Promise<ProductRecord[]> {
+  const db = getFirestore();
 
-      return {
-        id: document.id,
+  const snapshot = await getDocs(
+    collection(db, COLLECTION_NAME)
+  );
 
-        name:
-          typeof data.name === "string"
-            ? data.name
-            : "Unknown Product",
+  const firebaseProducts = snapshot.docs.map((document) => {
+    const data = document.data();
 
-        weightKg:
-          typeof data.weightKg === "number"
-            ? data.weightKg
-            : 0,
+    return {
+      id: document.id,
 
-        fullStockKg:
-          typeof data.fullStockKg === "number"
-            ? data.fullStockKg
-            : 1,
+      name:
+        typeof data.name === "string"
+          ? data.name
+          : "Unknown Product",
 
-        pricePerKg:
-          typeof data.pricePerKg === "number"
-            ? data.pricePerKg
-            : 0,
+      weightKg:
+        typeof data.weightKg === "number"
+          ? data.weightKg
+          : 0,
 
-        imagePath:
-          typeof data.imagePath === "string"
-            ? data.imagePath
-            : undefined,
-      };
-    });
+      fullStockKg:
+        typeof data.fullStockKg === "number"
+          ? data.fullStockKg
+          : 1,
 
-    await cacheProductsLocally(firebaseProducts);
+      pricePerKg:
+        typeof data.pricePerKg === "number"
+          ? data.pricePerKg
+          : 0,
 
-    return await Promise.all(
-      firebaseProducts.map(async (product) => {
-        if (product.imagePath) {
-          const remoteImageUrl = await getProductImageUrl(
-            product.imagePath
-          );
+      imagePath:
+        typeof data.imagePath === "string"
+          ? data.imagePath
+          : undefined,
+    };
+  });
 
-          if (remoteImageUrl) {
-            return {
-              ...product,
-              imageUrl: remoteImageUrl,
-            };
-          }
+  const productsWithImageUrls = await Promise.all(
+    firebaseProducts.map(async (product) => {
+      if (product.imagePath) {
+        const remoteImageUrl = await getProductImageUrl(
+          product.imagePath
+        );
+
+        if (remoteImageUrl) {
+          return {
+            ...product,
+            imageUrl: remoteImageUrl,
+          };
         }
+      }
 
-        return product;
-      })
-    );
+      return product;
+    })
+  );
 
-  } catch (error) {
-    console.warn(
-      "Firebase product load failed. Falling back to SQLite.",
-      error
-    );
+  await cacheProductsLocally(productsWithImageUrls);
 
-    const localProducts = await getLocalProducts();
-
-    return localProducts.map((product) => ({
-      id: product.id,
-      name: product.name,
-      weightKg: product.weightKg,
-      fullStockKg: product.fullStockKg,
-      pricePerKg: product.sellingPricePesewas / 100,
-      imagePath: product.imagePath ?? undefined,
-      imageUrl: undefined,
-    }));
-  }
+  return productsWithImageUrls;
 }
 
 export async function updateProductImage(
   productId: string,
-  imagePath: string | null
+  imagePath: string | null,
+  localImageUri: string | null = null
 ) {
   console.log(
     "FIRESTORE IMAGE UPDATE START:",
@@ -212,6 +209,22 @@ export async function updateProductImage(
     productId,
     imagePath
   );
+
+  const existingLocalProduct =
+    await getLocalProductById(productId);
+
+  if (!existingLocalProduct) {
+    return;
+  }
+
+  await saveLocalProduct({
+    ...existingLocalProduct,
+    imagePath,
+    localImageUri:
+      imagePath === null ? null : localImageUri,
+    updatedAt: new Date().toISOString(),
+    syncStatus: existingLocalProduct.syncStatus,
+  });
 }
 
 export async function saveProduct(
@@ -293,7 +306,8 @@ export async function cacheProductsLocally(
       await getLocalProductById(product.id);
 
     const hasPendingLocalChanges =
-      existingLocalProduct?.syncStatus === "PENDING";
+      existingLocalProduct?.syncStatus !== "SYNCED" &&
+      existingLocalProduct != null;
 
     await saveLocalProduct({
       id: product.id,
@@ -325,7 +339,10 @@ export async function cacheProductsLocally(
 
       imagePath: product.imagePath ?? null,
 
-      localImageUri: null,
+      localImageUri:
+        hasPendingLocalChanges
+          ? existingLocalProduct!.localImageUri
+          : product.imageUrl ?? null,
 
       active: true,
 

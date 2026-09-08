@@ -3,7 +3,11 @@ import {
   BluetoothManager,
 } from "react-native-bluetooth-escpos-printer";
 
-import { getPrinterSettings } from "@/src/db/repositories/printer-settings-repository";
+import {
+  getPrinterSettings,
+  type PrinterSettings,
+} from "@/src/db/repositories/printer-settings-repository";
+
 
 import {
   PermissionsAndroid,
@@ -102,21 +106,10 @@ export async function printTestReceipt(): Promise<void> {
   );
 }
 
-export type SaleReceiptItem = {
-  productName: string;
-  weightKg: number;
-  pricePerKg: number;
-  lineTotal: number;
-};
+export type SyncConfirmationKind = "BOD" | "EOD";
 
-export type SaleReceiptInput = {
-  saleId: string;
-  items: SaleReceiptItem[];
-  totalAmount: number;
-};
-
-export async function printSaleReceipt(
-  sale: SaleReceiptInput,
+export async function printSyncConfirmationReceipt(
+  kind: SyncConfirmationKind,
 ): Promise<"PRINTED" | "SKIPPED"> {
   const settings = await getPrinterSettings();
 
@@ -144,6 +137,91 @@ export async function printSaleReceipt(
 
   await BluetoothEscposPrinter.printText(
     "AUNTIE LIZZY'S BUTCHER SHOP\r\n",
+    {},
+  );
+
+  await BluetoothEscposPrinter.printText(
+    `${kind} SUCCESSFUL\r\n`,
+    {},
+  );
+
+  await BluetoothEscposPrinter.printText(
+    "------------------------------\r\n",
+    {},
+  );
+
+  await BluetoothEscposPrinter.printText(
+    `${new Date().toLocaleString()}\r\n`,
+    {},
+  );
+
+  await BluetoothEscposPrinter.printText(
+    "\r\n\r\n\r\n",
+    {},
+  );
+
+  return "PRINTED";
+}
+
+export type SaleReceiptItem = {
+  productName: string;
+  weightKg: number;
+  pricePerKg: number;
+  lineTotal: number;
+};
+
+export type SaleReceiptInput = {
+  saleId: string;
+  items: SaleReceiptItem[];
+  totalAmount: number;
+};
+
+
+export async function printSaleReceipt(
+
+  sale: SaleReceiptInput,
+  settings: PrinterSettings,
+): Promise<"PRINTED" | "SKIPPED"> {
+  console.log("SALE PRINT 1: ENTERED");
+
+  const shortReceiptNumber = sale.saleId.slice(0, 18) ?? sale.saleId;
+
+  if (!settings.enabled) {
+    console.log("SALE PRINT: SKIPPED - DISABLED");
+
+    return "SKIPPED";
+  }
+
+  if (!settings.printerAddress) {
+    throw new Error(
+      "Receipt printer is enabled but no printer is selected.",
+    );
+  }
+
+  await requestBluetoothPermissions();
+  console.log("SALE PRINT 4: PERMISSIONS OK");
+
+  console.log("SALE PRINT 5: CONNECTING");
+  await BluetoothManager.connect(
+    settings.printerAddress,
+  );
+  console.log("SALE PRINT 6: CONNECTED");
+
+  
+  await BluetoothEscposPrinter.printerInit();
+
+  await BluetoothEscposPrinter.printerAlign(
+    BluetoothEscposPrinter.ALIGN.CENTER,
+  );
+ 
+
+  await BluetoothEscposPrinter.printText(
+    "AUNTIE LIZZY'S BUTCHER SHOP\r\n",
+    {},
+  );
+
+  await BluetoothEscposPrinter.printText(
+    "Tel: 055 143 8483\r\n",
     {},
   );
 
@@ -194,7 +272,7 @@ export async function printSaleReceipt(
   );
 
   await BluetoothEscposPrinter.printText(
-    `Receipt: ${sale.saleId}\r\n`,
+    `Receipt: ${shortReceiptNumber}\r\n`,
     {},
   );
 
@@ -212,5 +290,6 @@ export async function printSaleReceipt(
     {},
   );
 
+  console.log("SALE PRINT 10: COMPLETE");
   return "PRINTED";
 }

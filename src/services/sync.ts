@@ -10,6 +10,16 @@ import {
 } from "@react-native-firebase/firestore";
 
 import { getDatabase } from "@/src/db/database";
+import {
+  getLocalBusinessSettings,
+  saveLocalBusinessSettings,
+} from "@/src/db/repositories/business-settings-repository";
+import {
+  refreshBusinessSettingsFromFirebase,
+} from "@/src/services/settings";
+import {
+  refreshProductsFromFirebase,
+} from "@/src/services/products";
 
 type SyncQueueRow = {
   id: string;
@@ -62,9 +72,80 @@ type PendingProductPayload = {
   createdAt: string;
 };
 
+type SyncSectionResult = {
+  attempted: number;
+  synced: number;
+  failed: number;
+};
 
-export async function syncPendingSales(): Promise<void> {
+type SyncCoordinatorResult = {
+  success: boolean;
+  skipped: boolean;
+  errorMessage: string | null;
+  businessSettings: SyncSectionResult;
+  products: SyncSectionResult;
+  stockBatches: SyncSectionResult;
+  sales: SyncSectionResult;
+};
+
+type BeginDaySyncResult = {
+  success: boolean;
+  skipped: boolean;
+  errorMessage: string | null;
+  businessSettingsRefreshed: boolean;
+  productsRefreshed: boolean;
+};
+
+export async function getEndOfDayPendingRecordCount(): Promise<number> {
   const localDb = await getDatabase();
+  const pendingQueue = await localDb.getFirstAsync<{
+    count: number;
+  }>(
+    `
+    SELECT COUNT(*) AS count
+    FROM sync_queue
+    WHERE status IN ('PENDING', 'FAILED');
+    `
+  );
+
+  const businessSettings =
+    await getLocalBusinessSettings();
+
+  return (pendingQueue?.count ?? 0) +
+    (businessSettings.syncStatus === "SYNCED" ? 0 : 1);
+}
+
+async function withSyncLock<T>(
+  operation: () => Promise<T>
+): Promise<{ skipped: boolean; result?: T }> {
+  if (syncInProgress) {
+    console.log("SYNC SKIPPED: Already in progress.");
+
+    return {
+      skipped: true,
+    };
+  }
+
+  syncInProgress = true;
+
+  try {
+    return {
+      skipped: false,
+      result: await operation(),
+    };
+  } finally {
+    syncInProgress = false;
+  }
+}
+
+
+export async function syncPendingSales(): Promise<SyncSectionResult> {
+  const localDb = await getDatabase();
+  const result: SyncSectionResult = {
+    attempted: 0,
+    synced: 0,
+    failed: 0,
+  };
 
   const pendingJobs =
     await localDb.getAllAsync<SyncQueueRow>(
@@ -83,21 +164,29 @@ export async function syncPendingSales(): Promise<void> {
     );
 
   if (pendingJobs.length === 0) {
-    return;
+    return result;
   }
 
-  console.log(
-    `Found ${pendingJobs.length} pending sale(s) to sync.`
-  );
+  console.log(`Found ${pendingJobs.length} pending sale(s) to sync.`);
 
   for (const job of pendingJobs) {
-    await syncOneSale(job);
+    result.attempted += 1;
+
+    const synced = await syncOneSale(job);
+
+    if (synced) {
+      result.synced += 1;
+    } else {
+      result.failed += 1;
+    }
   }
+
+  return result;
 }
 
 async function syncOneSale(
   job: SyncQueueRow
-): Promise<void> {
+): Promise<boolean> {
   const localDb = await getDatabase();
   const now = new Date().toISOString();
 
@@ -114,7 +203,7 @@ async function syncOneSale(
       "Invalid sale sync payload."
     );
 
-    return;
+    return false;
   }
 
   try {
@@ -409,10 +498,8 @@ async function syncOneSale(
       }
     );
 
-    console.log(
-      "SALE SYNCED:",
-      payload.saleId
-    );
+    console.log("SALE SYNCED");
+    return true;
   } catch (error) {
     const message =
       error instanceof Error
@@ -425,11 +512,9 @@ async function syncOneSale(
       message
     );
 
-    console.log(
-      "SALE SYNC FAILED:",
-      payload.saleId,
-      message
-    );
+    console.log("SALE SYNC FAILED");
+
+    return false;
   }
 }
 
@@ -462,8 +547,13 @@ async function markSyncFailed(
   );
 }
 
-export async function syncPendingStockBatches(): Promise<void> {
+export async function syncPendingStockBatches(): Promise<SyncSectionResult> {
   const localDb = await getDatabase();
+  const result: SyncSectionResult = {
+    attempted: 0,
+    synced: 0,
+    failed: 0,
+  };
 
   const pendingJobs =
     await localDb.getAllAsync<SyncQueueRow>(
@@ -482,21 +572,29 @@ export async function syncPendingStockBatches(): Promise<void> {
     );
 
   if (pendingJobs.length === 0) {
-    return;
+    return result;
   }
 
-  console.log(
-    `Found ${pendingJobs.length} pending stock batch(es) to sync.`
-  );
+  console.log(`Found ${pendingJobs.length} pending stock batch(es) to sync.`);
 
   for (const job of pendingJobs) {
-    await syncOneStockBatch(job);
+    result.attempted += 1;
+
+    const synced = await syncOneStockBatch(job);
+
+    if (synced) {
+      result.synced += 1;
+    } else {
+      result.failed += 1;
+    }
   }
+
+  return result;
 }
 
 async function syncOneStockBatch(
   job: SyncQueueRow
-): Promise<void> {
+): Promise<boolean> {
   const localDb = await getDatabase();
   const now = new Date().toISOString();
 
@@ -513,7 +611,7 @@ async function syncOneStockBatch(
       "Invalid stock batch sync payload."
     );
 
-    return;
+    return false;
   }
 
   try {
@@ -736,10 +834,8 @@ async function syncOneStockBatch(
       }
     );
 
-    console.log(
-      "STOCK BATCH SYNCED:",
-      payload.batchId
-    );
+    console.log("STOCK BATCH SYNCED");
+    return true;
   } catch (error) {
     const message =
       error instanceof Error
@@ -752,16 +848,19 @@ async function syncOneStockBatch(
       message
     );
 
-    console.log(
-      "STOCK BATCH SYNC FAILED:",
-      payload.batchId,
-      message
-    );
+    console.log("STOCK BATCH SYNC FAILED");
+
+    return false;
   }
 }
 
-export async function syncPendingProducts(): Promise<void> {
+export async function syncPendingProducts(): Promise<SyncSectionResult> {
   const localDb = await getDatabase();
+  const result: SyncSectionResult = {
+    attempted: 0,
+    synced: 0,
+    failed: 0,
+  };
 
   const pendingJobs =
     await localDb.getAllAsync<SyncQueueRow>(
@@ -780,21 +879,29 @@ export async function syncPendingProducts(): Promise<void> {
     );
 
   if (pendingJobs.length === 0) {
-    return;
+    return result;
   }
 
-  console.log(
-    `Found ${pendingJobs.length} pending product(s) to sync.`
-  );
+  console.log(`Found ${pendingJobs.length} pending product(s) to sync.`);
 
   for (const job of pendingJobs) {
-    await syncOneProduct(job);
+    result.attempted += 1;
+
+    const synced = await syncOneProduct(job);
+
+    if (synced) {
+      result.synced += 1;
+    } else {
+      result.failed += 1;
+    }
   }
+
+  return result;
 }
 
 async function syncOneProduct(
   job: SyncQueueRow
-): Promise<void> {
+): Promise<boolean> {
   const localDb = await getDatabase();
   const now = new Date().toISOString();
 
@@ -811,7 +918,7 @@ async function syncOneProduct(
       "Invalid product sync payload."
     );
 
-    return;
+    return false;
   }
 
   try {
@@ -905,10 +1012,8 @@ async function syncOneProduct(
       }
     );
 
-    console.log(
-      "PRODUCT SYNCED:",
-      payload.productId
-    );
+    console.log("PRODUCT SYNCED");
+    return true;
   } catch (error) {
     const message =
       error instanceof Error
@@ -921,17 +1026,243 @@ async function syncOneProduct(
       message
     );
 
-    console.log(
-      "PRODUCT SYNC FAILED:",
-      payload.productId,
-      message
+    console.log("PRODUCT SYNC FAILED");
+
+    return false;
+  }
+}
+let syncInProgress = false;
+
+async function syncPendingBusinessSettings(): Promise<SyncSectionResult> {
+  const localSettings = await getLocalBusinessSettings();
+  const result: SyncSectionResult = {
+    attempted: 0,
+    synced: 0,
+    failed: 0,
+  };
+
+  if (localSettings.syncStatus === "SYNCED") {
+    return result;
+  }
+
+  result.attempted = 1;
+
+  const snapshotUpdatedAt = localSettings.updatedAt;
+
+  try {
+    await saveLocalBusinessSettings({
+      ...localSettings,
+      syncStatus: "SYNCING",
+    });
+
+    const firestore = getFirestore();
+    const settingsRef = doc(
+      collection(firestore, "settings"),
+      "business"
     );
+
+    await setDoc(
+      settingsRef,
+      {
+        reorderPercent: localSettings.reorderPercent,
+        markupPercent: localSettings.markupPercent,
+        voiceEnabled: localSettings.voiceEnabled,
+        updatedAt: serverTimestamp(),
+      },
+      {
+        merge: true,
+      }
+    );
+
+    const currentLocal =
+      await getLocalBusinessSettings();
+
+    if (currentLocal.updatedAt !== snapshotUpdatedAt) {
+      console.warn("BUSINESS SETTINGS CHANGED DURING SYNC");
+
+      result.failed = 1;
+      return result;
+    }
+
+    await saveLocalBusinessSettings({
+      ...localSettings,
+      updatedAt: snapshotUpdatedAt,
+      syncStatus: "SYNCED",
+    });
+
+    result.synced = 1;
+    return result;
+  } catch {
+    await saveLocalBusinessSettings({
+      ...localSettings,
+      updatedAt: snapshotUpdatedAt,
+      syncStatus: "FAILED",
+    });
+
+    result.failed = 1;
+
+    console.log("BUSINESS SETTINGS SYNC FAILED");
+
+    return result;
   }
 }
 
+export async function beginDaySync(): Promise<BeginDaySyncResult> {
+  try {
+    const lockResult = await withSyncLock(async () => {
+      try {
+        await refreshBusinessSettingsFromFirebase();
+        await refreshProductsFromFirebase();
 
-export async function syncPendingChanges(): Promise<void> {
-  await syncPendingProducts();
-  await syncPendingStockBatches();
-  await syncPendingSales();
+        return {
+          success: true,
+          skipped: false,
+          errorMessage: null,
+          businessSettingsRefreshed: true,
+          productsRefreshed: true,
+        } satisfies BeginDaySyncResult;
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : String(error);
+
+        console.error("BEGIN DAY SYNC FAILED");
+
+        return {
+          success: false,
+          skipped: false,
+          errorMessage: message,
+          businessSettingsRefreshed: false,
+          productsRefreshed: false,
+        } satisfies BeginDaySyncResult;
+      }
+    });
+
+    if (lockResult.skipped) {
+      return {
+        success: false,
+        skipped: true,
+        errorMessage: "Sync already in progress.",
+        businessSettingsRefreshed: false,
+        productsRefreshed: false,
+      };
+    }
+
+    return lockResult.result!;
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error);
+
+    console.error("BEGIN DAY SYNC FAILED");
+
+    return {
+      success: false,
+      skipped: false,
+      errorMessage: message,
+      businessSettingsRefreshed: false,
+      productsRefreshed: false,
+    };
+  }
+}
+
+export async function syncPendingChanges(): Promise<SyncCoordinatorResult> {
+  try {
+    const lockResult = await withSyncLock(async () => {
+      const businessSettings =
+        await syncPendingBusinessSettings();
+      const products = await syncPendingProducts();
+      const stockBatches =
+        await syncPendingStockBatches();
+      const sales = await syncPendingSales();
+
+      const failedCount =
+        businessSettings.failed +
+        products.failed +
+        stockBatches.failed +
+        sales.failed;
+
+      return {
+        success: failedCount === 0,
+        skipped: false,
+        errorMessage:
+          failedCount === 0
+            ? null
+            : "One or more sync jobs failed.",
+        businessSettings,
+        products,
+        stockBatches,
+        sales,
+      } satisfies SyncCoordinatorResult;
+    });
+
+    if (lockResult.skipped) {
+      return {
+        success: false,
+        skipped: true,
+        errorMessage: "Sync already in progress.",
+        businessSettings: {
+          attempted: 0,
+          synced: 0,
+          failed: 0,
+        },
+        products: {
+          attempted: 0,
+          synced: 0,
+          failed: 0,
+        },
+        stockBatches: {
+          attempted: 0,
+          synced: 0,
+          failed: 0,
+        },
+        sales: {
+          attempted: 0,
+          synced: 0,
+          failed: 0,
+        },
+      };
+    }
+
+    return lockResult.result!;
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error);
+
+    console.error("SYNC FAILED");
+
+    return {
+      success: false,
+      skipped: false,
+      errorMessage: message,
+      businessSettings: {
+        attempted: 0,
+        synced: 0,
+        failed: 0,
+      },
+      products: {
+        attempted: 0,
+        synced: 0,
+        failed: 0,
+      },
+      stockBatches: {
+        attempted: 0,
+        synced: 0,
+        failed: 0,
+      },
+      sales: {
+        attempted: 0,
+        synced: 0,
+        failed: 0,
+      },
+    };
+  }
+}
+
+export async function endDaySync(): Promise<SyncCoordinatorResult> {
+  return syncPendingChanges();
 }

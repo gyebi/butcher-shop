@@ -15,11 +15,20 @@ import {
 } from "@/src/services/settings";
 
 import {
+  beginDaySync,
+  endDaySync,
+  getEndOfDayPendingRecordCount,
+} from "@/src/services/sync";
+
+import {
   getPrinterSettings,
   savePrinterSettings,
 } from "@/src/db/repositories/printer-settings-repository";
 
-import { printTestReceipt } from "@/src/services/printer";
+import {
+  printSyncConfirmationReceipt,
+  printTestReceipt,
+} from "@/src/services/printer";
 
 
 
@@ -41,6 +50,9 @@ export default function SettingsScreen() {
   const [printerMessage, setPrinterMessage] = useState("");
 
   const [testingPrinter, setTestingPrinter] = useState(false);
+  const [runningBod, setRunningBod] = useState(false);
+  const [runningEod, setRunningEod] = useState(false);
+  const [dayProcessMessage, setDayProcessMessage] = useState("");
 
   useFocusEffect(
     useCallback(() => {
@@ -51,6 +63,7 @@ export default function SettingsScreen() {
           setLoading(true);
           setMessage("");
           setPrinterMessage("");
+          setDayProcessMessage("");
 
           const [
             savedBusinessSettings,
@@ -94,10 +107,7 @@ export default function SettingsScreen() {
             String(savedPrinterSettings.paperWidthMm)
           );
 
-          console.log(
-            "Loaded printer settings:",
-            savedPrinterSettings
-          );
+          console.log("Printer settings loaded.");
         } catch (error) {
           console.error(
             "Failed to load settings:",
@@ -201,12 +211,7 @@ export default function SettingsScreen() {
         updatedAt: new Date().toISOString(),
       });
 
-      const saved = await getPrinterSettings();
-
-      console.log(
-        "Printer settings after save:",
-        saved
-      );
+      console.log("Printer settings saved.");
 
       setPrinterMessage(
         "Printer settings saved."
@@ -243,6 +248,125 @@ export default function SettingsScreen() {
       );
     } finally {
       setTestingPrinter(false);
+    }
+  };
+
+  const summarizeError = (error: unknown): string => {
+    if (error instanceof Error) {
+      const message = error.message.trim();
+
+      if (!message) {
+        return "Unknown error";
+      }
+
+      if (message.startsWith("Inventory conflict")) {
+        return "Inventory conflict";
+      }
+
+      if (message.includes("printer")) {
+        return "Printer unavailable";
+      }
+
+      return message.split("\n")[0];
+    }
+
+    const message = String(error).trim();
+
+    return message || "Unknown error";
+  };
+
+  const handleBeginDay = async () => {
+    if (runningBod || runningEod) {
+      return;
+    }
+
+    try {
+      setRunningBod(true);
+      setDayProcessMessage("");
+
+      console.log("BOD STARTED");
+
+      const result = await beginDaySync();
+
+      if (!result.success) {
+        const reason =
+          summarizeError(
+            result.errorMessage ?? "Unknown error"
+          );
+
+        console.log(`BOD FAILED: ${reason}`);
+        setDayProcessMessage("BOD failed.");
+        return;
+      }
+
+      try {
+        await printSyncConfirmationReceipt("BOD");
+      } catch (error) {
+        console.warn(
+          `BOD PRINT FAILED: ${summarizeError(error)}`
+        );
+      }
+
+      console.log("BOD SYNC COMPLETE");
+      setDayProcessMessage("BOD Successful.");
+    } catch (error) {
+      const reason = summarizeError(error);
+
+      console.log(`BOD FAILED: ${reason}`);
+      setDayProcessMessage("BOD failed.");
+    } finally {
+      setRunningBod(false);
+    }
+  };
+
+  const handleEndDay = async () => {
+    if (runningBod || runningEod) {
+      return;
+    }
+
+    try {
+      setRunningEod(true);
+      setDayProcessMessage("");
+
+      console.log("EOD STARTED");
+
+      const pendingRecords =
+        await getEndOfDayPendingRecordCount();
+
+      console.log(
+        `EOD PENDING RECORDS: ${pendingRecords}`
+      );
+
+      const result = await endDaySync();
+
+      if (!result.success) {
+        const reason =
+          summarizeError(
+            result.errorMessage ?? "Unknown error"
+          );
+
+        console.log(`EOD FAILED: ${reason}`);
+        setDayProcessMessage("EOD failed.");
+        return;
+      }
+
+      try {
+        await printSyncConfirmationReceipt("EOD");
+      } catch (error) {
+        console.warn(
+          `EOD PRINT FAILED: ${summarizeError(error)}`
+        );
+      }
+
+      console.log("EOD SYNC COMPLETE");
+      setDayProcessMessage("EOD Successful.");
+    } catch (error) {
+      const reason = summarizeError(error);
+
+      console.log(`EOD FAILED: ${reason}`);
+      setDayProcessMessage("EOD failed.");
+    } finally {
+      setRunningEod(false);
     }
   };
 
@@ -373,6 +497,55 @@ export default function SettingsScreen() {
         {message !== "" && (
           <Text style={styles.message}>
             {message}
+          </Text>
+        )}
+      </View>
+
+      <View style={styles.dayOpsCard}>
+        <Text style={styles.sectionTitle}>
+          Day Operations
+        </Text>
+
+        <Text style={styles.sectionDescription}>
+          Run BOD before trading and EOD when the
+          business day closes.
+        </Text>
+
+        <View style={styles.dayOpsRow}>
+          <Pressable
+            style={[
+              styles.dayOpsButton,
+              styles.dayOpsButtonBod,
+              (runningBod || runningEod) &&
+                styles.dayOpsButtonDisabled,
+            ]}
+            disabled={runningBod || runningEod}
+            onPress={handleBeginDay}
+          >
+            <Text style={styles.dayOpsButtonText}>
+              {runningBod ? "RUNNING..." : "START BOD"}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[
+              styles.dayOpsButton,
+              styles.dayOpsButtonEod,
+              (runningBod || runningEod) &&
+                styles.dayOpsButtonDisabled,
+            ]}
+            disabled={runningBod || runningEod}
+            onPress={handleEndDay}
+          >
+            <Text style={styles.dayOpsButtonText}>
+              {runningEod ? "RUNNING..." : "START EOD"}
+            </Text>
+          </Pressable>
+        </View>
+
+        {dayProcessMessage !== "" && (
+          <Text style={styles.message}>
+            {dayProcessMessage}
           </Text>
         )}
       </View>
@@ -541,6 +714,15 @@ const styles = StyleSheet.create({
     borderColor: "#e4dfd9",
   },
 
+  dayOpsCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 18,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#e4dfd9",
+    marginTop: 20,
+  },
+
   label: {
     fontSize: 14,
     fontWeight: "700",
@@ -627,6 +809,36 @@ const styles = StyleSheet.create({
     textAlign: "center",
     color: "#367c4a",
     fontWeight: "700",
+  },
+
+  dayOpsRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 16,
+  },
+
+  dayOpsButton: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: 13,
+    alignItems: "center",
+  },
+
+  dayOpsButtonBod: {
+    backgroundColor: "#2f6f44",
+  },
+
+  dayOpsButtonEod: {
+    backgroundColor: "#1f1f1f",
+  },
+
+  dayOpsButtonDisabled: {
+    opacity: 0.4,
+  },
+
+  dayOpsButtonText: {
+    color: "#ffffff",
+    fontWeight: "800",
   },
 
   printerCard: {

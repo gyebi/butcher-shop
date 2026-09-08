@@ -1,16 +1,13 @@
 import {
+  getLocalBusinessSettings,
+  saveLocalBusinessSettings,
+} from "@/src/db/repositories/business-settings-repository";
+import {
   collection,
   doc,
   getDoc,
   getFirestore,
-  serverTimestamp,
-  setDoc,
 } from "@react-native-firebase/firestore";
-
-import {
-  getLocalBusinessSettings,
-  saveLocalBusinessSettings,
-} from "@/src/db/repositories/business-settings-repository";
 
 export type BusinessSettings = {
   reorderPercent: number;
@@ -22,10 +19,7 @@ const SETTINGS_COLLECTION = "settings";
 const SETTINGS_DOC = "business";
 
 /**
- * LOCAL FIRST
- *
- * This is what the UI should call when it needs settings.
- * It does not require Firebase.
+ * Local-first settings read for normal UI use.
  */
 export async function loadBusinessSettings(): Promise<BusinessSettings> {
   const localSettings = await getLocalBusinessSettings();
@@ -38,10 +32,8 @@ export async function loadBusinessSettings(): Promise<BusinessSettings> {
 }
 
 /**
- * CLOUD REFRESH
- *
- * Call this in the background when internet is available.
- * It must not overwrite local PENDING changes.
+ * BOD cloud refresh for business settings.
+ * Any non-synced local row wins over cloud data.
  */
 export async function refreshBusinessSettingsFromFirebase():
   Promise<BusinessSettings | null> {
@@ -83,9 +75,8 @@ export async function refreshBusinessSettingsFromFirebase():
   const currentLocal =
     await getLocalBusinessSettings();
 
-  // Do not overwrite settings changed locally
-  // but not yet synchronized.
-  if (currentLocal.syncStatus === "PENDING") {
+  // Keep any local row that still needs sync.
+  if (currentLocal.syncStatus !== "SYNCED") {
     return {
       reorderPercent:
         currentLocal.reorderPercent,
@@ -106,10 +97,7 @@ export async function refreshBusinessSettingsFromFirebase():
 }
 
 /**
- * LOCAL-FIRST SAVE
- *
- * Save immediately to SQLite.
- * Firebase is attempted afterward.
+ * Local-only save during the trading day.
  */
 export async function saveBusinessSettings(
   settings: BusinessSettings
@@ -117,71 +105,9 @@ export async function saveBusinessSettings(
   const updatedAt =
     new Date().toISOString();
 
-  // 1. Save locally immediately.
   await saveLocalBusinessSettings({
     ...settings,
     updatedAt,
     syncStatus: "PENDING",
   });
-
-  // 2. Try Firebase without making the
-  // local save depend on the network.
-  void syncBusinessSettingsToFirebase(
-    settings,
-    updatedAt
-  );
-}
-
-async function syncBusinessSettingsToFirebase(
-  settings: BusinessSettings,
-  localUpdatedAt: string
-): Promise<void> {
-  try {
-    const firestore = getFirestore();
-
-    const settingsRef = doc(
-      collection(
-        firestore,
-        SETTINGS_COLLECTION
-      ),
-      SETTINGS_DOC
-    );
-
-    await setDoc(
-      settingsRef,
-      {
-        ...settings,
-        updatedAt: serverTimestamp(),
-      },
-      {
-        merge: true,
-      }
-    );
-
-    // Check that the user has not made another
-    // local change while Firebase was saving.
-    const currentLocal =
-      await getLocalBusinessSettings();
-
-    if (
-      currentLocal.updatedAt !==
-      localUpdatedAt
-    ) {
-      return;
-    }
-
-    await saveLocalBusinessSettings({
-      ...settings,
-      updatedAt: localUpdatedAt,
-      syncStatus: "SYNCED",
-    });
-  } catch (error) {
-    // This is acceptable offline.
-    // SQLite already contains the change
-    // and remains PENDING.
-    console.log(
-      "Business settings saved locally; Firebase unavailable.",
-      error
-    );
-  }
 }
