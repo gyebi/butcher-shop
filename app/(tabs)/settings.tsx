@@ -30,7 +30,7 @@ import {
   printTestReceipt,
 } from "@/src/services/printer";
 
-
+import { getEndOfDaySummary } from "@/src/db/repositories/sales-repository";
 
 export default function SettingsScreen() {
   const [reorderInput, setReorderInput] = useState("20");
@@ -330,6 +330,16 @@ export default function SettingsScreen() {
 
       console.log("EOD STARTED");
 
+      const today = new Date().toISOString().slice(0, 10);
+
+      const summary = await getEndOfDaySummary(today);
+
+      console.log("EOD SUMMARY:", {
+        transactionCount: summary.transactionCount,
+        totalSalesPesewas: summary.totalSalesPesewas,
+        products: summary.products,
+      });
+
       const pendingRecords =
         await getEndOfDayPendingRecordCount();
 
@@ -517,7 +527,7 @@ export default function SettingsScreen() {
               styles.dayOpsButton,
               styles.dayOpsButtonBod,
               (runningBod || runningEod) &&
-                styles.dayOpsButtonDisabled,
+              styles.dayOpsButtonDisabled,
             ]}
             disabled={runningBod || runningEod}
             onPress={handleBeginDay}
@@ -532,7 +542,7 @@ export default function SettingsScreen() {
               styles.dayOpsButton,
               styles.dayOpsButtonEod,
               (runningBod || runningEod) &&
-                styles.dayOpsButtonDisabled,
+              styles.dayOpsButtonDisabled,
             ]}
             disabled={runningBod || runningEod}
             onPress={handleEndDay}
