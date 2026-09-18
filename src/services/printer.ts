@@ -109,6 +109,101 @@ export async function printTestReceipt(): Promise<void> {
   );
 }
 
+export type StockCorrectionReceiptInput = {
+  productName: string;
+  previousFullStockKg: number;
+  correctedFullStockKg: number;
+  currentWeightKg: number;
+};
+
+export async function printStockCorrectionReceipt(
+  correction: StockCorrectionReceiptInput,
+  settings: PrinterSettings,
+): Promise<"PRINTED" | "SKIPPED"> {
+  if (!settings.enabled) {
+    return "SKIPPED";
+  }
+
+  if (!settings.printerAddress) {
+    throw new Error(
+      "Receipt printer is enabled but no printer is selected.",
+    );
+  }
+
+  await requestBluetoothPermissions();
+  await BluetoothManager.connect(settings.printerAddress);
+  await BluetoothEscposPrinter.printerInit();
+
+  await BluetoothEscposPrinter.printerAlign(
+    BluetoothEscposPrinter.ALIGN.CENTER,
+  );
+
+  await BluetoothEscposPrinter.printText(
+    "AUNTIE LIZZY'S BUTCHER SHOP\r\n",
+    {},
+  );
+
+  await BluetoothEscposPrinter.printText(
+    "Tel: 055 143 8483\r\n",
+    {},
+  );
+
+  await BluetoothEscposPrinter.printText(
+    "STOCK CORRECTION\r\n",
+    {},
+  );
+
+  await BluetoothEscposPrinter.printText(
+    "------------------------------\r\n",
+    {},
+  );
+
+  await BluetoothEscposPrinter.printerAlign(
+    BluetoothEscposPrinter.ALIGN.LEFT,
+  );
+
+  await BluetoothEscposPrinter.printText(
+    `Product: ${correction.productName}\r\n\r\n`,
+    {},
+  );
+
+  await BluetoothEscposPrinter.printText(
+    `Previous Full Stock: ${correction.previousFullStockKg.toFixed(2)} kg\r\n`,
+    {},
+  );
+
+  await BluetoothEscposPrinter.printText(
+    `Corrected Full Stock: ${correction.correctedFullStockKg.toFixed(2)} kg\r\n`,
+    {},
+  );
+
+  await BluetoothEscposPrinter.printText(
+    `Current Available: ${correction.currentWeightKg.toFixed(2)} kg\r\n`,
+    {},
+  );
+
+  await BluetoothEscposPrinter.printText(
+    "------------------------------\r\n",
+    {},
+  );
+
+  await BluetoothEscposPrinter.printerAlign(
+    BluetoothEscposPrinter.ALIGN.CENTER,
+  );
+
+  await BluetoothEscposPrinter.printText(
+    `${new Date().toLocaleString()}\r\n`,
+    {},
+  );
+
+  await BluetoothEscposPrinter.printText(
+    "CORRECTION SAVED\r\n\r\n\r\n",
+    {},
+  );
+
+  return "PRINTED";
+}
+
 export type SyncConfirmationKind = "BOD" | "EOD";
 
 export async function printSyncConfirmationReceipt(

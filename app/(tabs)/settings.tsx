@@ -29,7 +29,17 @@ import {
   printSyncConfirmationReceipt,
   printTestReceipt,
   printEndOfDaySummary,
+  printStockCorrectionReceipt,
 } from "@/src/services/printer";
+
+import {
+  getLocalProducts,
+  type LocalProduct,
+} from "@/src/db/repositories/products-repository";
+
+import {
+  correctProductFullStockWeight,
+} from "@/src/services/products";
 
 import { getEndOfDaySummary } from "@/src/db/repositories/sales-repository";
 
@@ -55,6 +65,20 @@ export default function SettingsScreen() {
   const [runningEod, setRunningEod] = useState(false);
   const [dayProcessMessage, setDayProcessMessage] = useState("");
 
+  const [products, setProducts] = useState<LocalProduct[]>([]);
+  const [selectedProductId, setSelectedProductId] =
+    useState<string | null>(null);
+  const [productDropdownOpen, setProductDropdownOpen] = useState(false);
+
+  const [correctedFullStockInput, setCorrectedFullStockInput] =
+    useState("");
+
+  const [correctingStock, setCorrectingStock] =
+    useState(false);
+
+  const [stockCorrectionMessage, setStockCorrectionMessage] =
+    useState("");
+
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
@@ -69,14 +93,18 @@ export default function SettingsScreen() {
           const [
             savedBusinessSettings,
             savedPrinterSettings,
+            localProducts,
           ] = await Promise.all([
             loadBusinessSettings(),
             getPrinterSettings(),
+            getLocalProducts(),
           ]);
 
           if (!isActive) {
             return;
           }
+
+          setProducts(localProducts);
 
           if (savedBusinessSettings) {
             setReorderInput(
@@ -137,6 +165,24 @@ export default function SettingsScreen() {
 
   const reorderPercent = Number(reorderInput);
   const markupPercent = Number(markupInput);
+
+  const selectedProduct =
+    products.find(
+      (product) => product.id === selectedProductId
+    ) ?? null;
+
+  const correctedFullStockKg = Number(correctedFullStockInput);
+
+  const fullStockCorrectionValid =
+    Number.isFinite(correctedFullStockKg) &&
+    correctedFullStockKg > 0 &&
+    (!selectedProduct ||
+      correctedFullStockKg >= selectedProduct.weightKg);
+
+  const canCorrectFullStock =
+    selectedProduct !== null &&
+    fullStockCorrectionValid &&
+    !correctingStock;
 
   const reorderValid =
     Number.isFinite(reorderPercent) &&
@@ -274,6 +320,94 @@ export default function SettingsScreen() {
     const message = String(error).trim();
 
     return message || "Unknown error";
+  };
+
+
+  const handleCorrectFullStock = async () => {
+    if (!selectedProduct) {
+      setStockCorrectionMessage("Select a product first.");
+      return;
+    }
+
+    if (
+      !Number.isFinite(correctedFullStockKg) ||
+      correctedFullStockKg <= 0
+    ) {
+      setStockCorrectionMessage(
+        "Enter a valid full stock weight."
+      );
+      return;
+    }
+
+    if (correctedFullStockKg < selectedProduct.weightKg) {
+      setStockCorrectionMessage(
+        "Full stock cannot be less than available stock."
+      );
+      return;
+    }
+
+    const previousFullStockKg = selectedProduct.fullStockKg;
+    const currentWeightKg = selectedProduct.weightKg;
+
+    try {
+      setCorrectingStock(true);
+      setStockCorrectionMessage("");
+
+      await correctProductFullStockWeight(
+        selectedProduct.id,
+        correctedFullStockKg
+      );
+
+      setProducts((currentProducts) =>
+        currentProducts.map((product) =>
+          product.id === selectedProduct.id
+            ? {
+                ...product,
+                fullStockKg: correctedFullStockKg,
+              }
+            : product
+        )
+      );
+
+      setCorrectedFullStockInput("");
+
+      let receiptMessage = "";
+
+      try {
+        const printerSettings = await getPrinterSettings();
+        const printResult = await printStockCorrectionReceipt(
+          {
+            productName: selectedProduct.name,
+            previousFullStockKg,
+            correctedFullStockKg,
+            currentWeightKg,
+          },
+          printerSettings,
+        );
+
+        if (printResult === "PRINTED") {
+          receiptMessage = " Receipt printed.";
+        }
+      } catch (printError) {
+        console.warn(
+          `STOCK CORRECTION PRINT FAILED: ${summarizeError(printError)}`
+        );
+        receiptMessage = " Correction saved, but receipt printing failed.";
+      }
+
+      setStockCorrectionMessage(
+        `${selectedProduct.name} full stock corrected to ${correctedFullStockKg.toFixed(2)} kg.${receiptMessage}`
+      );
+    } catch (error) {
+      console.error("Full stock correction failed:", error);
+      setStockCorrectionMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not correct full stock weight."
+      );
+    } finally {
+      setCorrectingStock(false);
+    }
   };
 
   const handleBeginDay = async () => {
@@ -518,6 +652,121 @@ export default function SettingsScreen() {
         )}
       </View>
 
+      <View style={styles.stockCorrectionCard}>
+        <Text style={styles.sectionTitle}>
+          Correct Full Stock
+        </Text>
+
+        <Text style={styles.sectionDescription}>
+          Correct the original full-stock weight without changing
+          its current available stock.
+        </Text>
+
+        <Text style={styles.label}>
+          Product
+        </Text>
+
+        <Pressable
+          style={styles.productPickerButton}
+          onPress={() =>
+            setProductDropdownOpen((current) => !current)
+          }
+        >
+          <Text
+            style={[
+              styles.productPickerText,
+              !selectedProduct && styles.productPickerPlaceholder,
+            ]}
+          >
+            {selectedProduct
+              ? `${selectedProduct.name} (${selectedProduct.fullStockKg.toFixed(2)} kg)`
+              : "Select a product"}
+          </Text>
+          <Text style={styles.productPickerChevron}>
+            {productDropdownOpen ? "▲" : "▼"}
+          </Text>
+        </Pressable>
+
+        {productDropdownOpen && (
+          <View style={styles.productOptions}>
+            {products.length === 0 ? (
+              <Text style={styles.productEmptyText}>
+                No active products found.
+              </Text>
+            ) : (
+              products.map((product) => (
+                <Pressable
+                  key={product.id}
+                  style={[
+                    styles.productOption,
+                    product.id === selectedProductId &&
+                      styles.productOptionSelected,
+                  ]}
+                  onPress={() => {
+                    setSelectedProductId(product.id);
+                    setProductDropdownOpen(false);
+                    setStockCorrectionMessage("");
+                  }}
+                >
+                  <Text style={styles.productOptionName}>
+                    {product.name}
+                  </Text>
+                  <Text style={styles.productOptionDetail}>
+                    Available: {product.weightKg.toFixed(2)} kg · Full: {product.fullStockKg.toFixed(2)} kg
+                  </Text>
+                </Pressable>
+              ))
+            )}
+          </View>
+        )}
+
+        <Text style={styles.label}>
+          Correct full-stock weight
+        </Text>
+
+        <View style={styles.inputRow}>
+          <TextInput
+            value={correctedFullStockInput}
+            onChangeText={setCorrectedFullStockInput}
+            keyboardType="decimal-pad"
+            style={styles.input}
+            placeholder="0.00"
+            selectTextOnFocus
+          />
+
+          <Text style={styles.suffix}>
+            kg
+          </Text>
+        </View>
+
+        {selectedProduct && !fullStockCorrectionValid && (
+          <Text style={styles.errorText}>
+            Enter at least {selectedProduct.weightKg.toFixed(2)} kg.
+          </Text>
+        )}
+
+        <Pressable
+          disabled={!canCorrectFullStock}
+          style={[
+            styles.saveButton,
+            !canCorrectFullStock && styles.saveButtonDisabled,
+          ]}
+          onPress={handleCorrectFullStock}
+        >
+          <Text style={styles.saveButtonText}>
+            {correctingStock
+              ? "CORRECTING..."
+              : "SAVE FULL-STOCK CORRECTION"}
+          </Text>
+        </Pressable>
+
+        {stockCorrectionMessage !== "" && (
+          <Text style={styles.message}>
+            {stockCorrectionMessage}
+          </Text>
+        )}
+      </View>
+
       <View style={styles.dayOpsCard}>
         <Text style={styles.sectionTitle}>
           Day Operations
@@ -731,6 +980,15 @@ const styles = StyleSheet.create({
     borderColor: "#e4dfd9",
   },
 
+  stockCorrectionCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 18,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#e4dfd9",
+    marginTop: 20,
+  },
+
   dayOpsCard: {
     backgroundColor: "#ffffff",
     borderRadius: 18,
@@ -819,6 +1077,72 @@ const styles = StyleSheet.create({
   saveButtonText: {
     color: "#ffffff",
     fontWeight: "800",
+  },
+
+  productPickerButton: {
+    minHeight: 54,
+    borderWidth: 2,
+    borderColor: "#d8d2cc",
+    borderRadius: 14,
+    paddingHorizontal: 15,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  productPickerText: {
+    flex: 1,
+    color: "#211c18",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+
+  productPickerPlaceholder: {
+    color: "#817770",
+    fontWeight: "400",
+  },
+
+  productPickerChevron: {
+    marginLeft: 12,
+    color: "#5d554f",
+    fontSize: 12,
+  },
+
+  productOptions: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#d8d2cc",
+    borderRadius: 14,
+    overflow: "hidden",
+  },
+
+  productOption: {
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e4dfd9",
+  },
+
+  productOptionSelected: {
+    backgroundColor: "#e5f0e8",
+  },
+
+  productOptionName: {
+    color: "#211c18",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
+  productOptionDetail: {
+    color: "#817770",
+    fontSize: 12,
+    marginTop: 3,
+  },
+
+  productEmptyText: {
+    color: "#817770",
+    fontSize: 14,
+    padding: 15,
   },
 
   message: {
