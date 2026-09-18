@@ -28,6 +28,7 @@ import {
 import {
   printSyncConfirmationReceipt,
   printTestReceipt,
+  printEndOfDaySummary,
 } from "@/src/services/printer";
 
 import { getEndOfDaySummary } from "@/src/db/repositories/sales-repository";
@@ -361,7 +362,13 @@ export default function SettingsScreen() {
       }
 
       try {
-        await printSyncConfirmationReceipt("EOD");
+        const printerSettings =
+          await getPrinterSettings();
+
+        await printEndOfDaySummary(
+          summary,
+          printerSettings,
+        );
       } catch (error) {
         console.warn(
           `EOD PRINT FAILED: ${summarizeError(error)}`
