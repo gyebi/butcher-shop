@@ -251,6 +251,55 @@ export async function saveProduct(
   );
 }
 
+export async function correctProductFullStockWeight(
+  productId: string,
+  correctedFullStockKg: number
+): Promise<void> {
+  if (
+    !Number.isFinite(correctedFullStockKg) ||
+    correctedFullStockKg <= 0
+  ) {
+    throw new Error(
+      "Corrected full stock weight must be greater than zero."
+    );
+  }
+
+  const existingProduct =
+    await getLocalProductById(productId);
+
+  if (!existingProduct) {
+    throw new Error("Product not found.");
+  }
+
+  const correctedProduct: ProductRecord = {
+    id: existingProduct.id,
+    name: existingProduct.name,
+
+    // DO NOT change current available stock.
+    weightKg: existingProduct.weightKg,
+
+    // Correct only the wrongly entered full stock.
+    fullStockKg: correctedFullStockKg,
+
+    pricePerKg:
+      existingProduct.sellingPricePesewas / 100,
+
+    imagePath:
+      existingProduct.imagePath ?? undefined,
+  };
+
+  // Update Firebase first.
+  await saveProduct(correctedProduct);
+
+  // Only update SQLite after Firebase succeeds.
+  await saveLocalProduct({
+    ...existingProduct,
+    fullStockKg: correctedFullStockKg,
+    updatedAt: new Date().toISOString(),
+    syncStatus: "SYNCED",
+  });
+}
+
 
 export async function seedProducts(
   products: ProductRecord[]

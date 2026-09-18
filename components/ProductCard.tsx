@@ -187,27 +187,27 @@ const styles = StyleSheet.create({
   },
 
   thumbnail: {
-  width: "100%",
-  height: 140,
-  borderRadius: 12,
-  marginBottom: 14,
-},
+    width: "100%",
+    height: 140,
+    borderRadius: 12,
+    marginBottom: 14,
+  },
 
-thumbnailPlaceholder: {
-  width: "100%",
-  height: 140,
-  borderRadius: 12,
-  marginBottom: 14,
-  backgroundColor: "#eee9e4",
-  alignItems: "center",
-  justifyContent: "center",
-},
+  thumbnailPlaceholder: {
+    width: "100%",
+    height: 140,
+    borderRadius: 12,
+    marginBottom: 14,
+    backgroundColor: "#eee9e4",
+    alignItems: "center",
+    justifyContent: "center",
+  },
 
   thumbnailPlaceholderText: {
-  color: "#8a817a",
-  fontSize: 12,
-  fontWeight: "600",
-},
+    color: "#8a817a",
+    fontSize: 12,
+    fontWeight: "600",
+  },
 
   imageAction: {
     alignSelf: "flex-start",
